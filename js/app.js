@@ -2573,8 +2573,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const handleRouteChange = async (event) => {
         const overlay = document.getElementById('fullscreen-cover-overlay');
         const isFullscreenOpen = overlay && getComputedStyle(overlay).display === 'flex';
+        const shouldOpenFullscreen = window.location.hash.startsWith('#fullscreen');
 
-        if (isFullscreenOpen && !window.location.hash.startsWith('#fullscreen')) {
+        if (isFullscreenOpen && !shouldOpenFullscreen) {
             ui.closeFullscreenCover();
         }
 
@@ -2605,6 +2606,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         await router();
         updateTabTitle(player);
+
+        if (shouldOpenFullscreen && !isFullscreenOpen && player.currentTrack) {
+            const nextTrack = player.getNextTrack();
+            ui.showFullscreenCover(player.currentTrack, nextTrack, lyricsManager, player.activeElement);
+        }
     };
 
     await handleRouteChange();
