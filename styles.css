@@ -8614,7 +8614,12 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
     font-size: 0.85rem;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition:
+        background-color 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease,
+        box-shadow 0.2s ease,
+        transform 0.2s ease;
     max-width: 100%;
     overflow: hidden;
     pointer-events: auto;
@@ -8630,7 +8635,18 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
 .offline-radio-btn:hover {
     color: var(--foreground);
     border-color: var(--foreground);
-    background: rgba(var(--highlight-rgb), 0.05);
+    background: rgb(var(--highlight-rgb) / 0.05);
+}
+
+.offline-radio-btn:focus-visible {
+    outline: none;
+    border-color: var(--highlight);
+    box-shadow: 0 0 0 3px rgb(var(--highlight-rgb) / 0.2);
+}
+
+.offline-radio-btn:active {
+    transform: scale(0.99);
+    background: rgb(var(--highlight-rgb) / 0.08);
 }
 
 .offline-radio-btn.offline-radio-active {
@@ -8638,6 +8654,7 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
     border-color: var(--highlight);
     background: var(--highlight);
     color: var(--background);
+    box-shadow: 0 10px 24px rgb(var(--highlight-rgb) / 0.2);
 }
 
 .offline-radio-btn.offline-radio-active:hover {
