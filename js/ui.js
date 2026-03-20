@@ -1252,28 +1252,6 @@ export class UIRenderer {
             this._radioPauseHandler = null;
         }
 
-        // Turn off offline radio when fullscreen closes
-        if (this._offlineRadioActive) {
-            this._offlineRadioActive = false;
-            if (this.player) {
-                this.player.repeatMode = 0;
-                this.player.shuffleActive = false;
-                // Pause audio when radio stops
-                if (this.player.activeElement) {
-                    this.player.activeElement.pause();
-                }
-            }
-            window.dispatchEvent(new CustomEvent('repeat-mode-changed'));
-            // Update the radio button label if it exists
-            const radioBtn = document.getElementById('offline-radio-btn');
-            if (radioBtn) {
-                radioBtn.classList.remove('offline-radio-active');
-                const label = radioBtn.querySelector('span');
-                const selectedArtist = this._offlineSelectedArtist;
-                if (label) label.textContent = selectedArtist ? `Start Radio — ${selectedArtist} only` : 'Start Radio with all tracks';
-            }
-        }
-
         const playerBar = document.querySelector('.now-playing-bar');
         if (playerBar) playerBar.style.removeProperty('display');
 
@@ -1312,6 +1290,29 @@ export class UIRenderer {
         if (this.uiToggleMouseTimer) {
             clearTimeout(this.uiToggleMouseTimer);
             this.uiToggleMouseTimer = null;
+        }
+    }
+
+    stopOfflineRadioPlayback() {
+        if (!this._offlineRadioActive) return;
+
+        this._offlineRadioActive = false;
+        if (this.player) {
+            this.player.repeatMode = 0;
+            this.player.shuffleActive = false;
+            if (this.player.activeElement) {
+                this.player.activeElement.pause();
+            }
+        }
+
+        window.dispatchEvent(new CustomEvent('repeat-mode-changed'));
+
+        const radioBtn = document.getElementById('offline-radio-btn');
+        if (radioBtn) {
+            radioBtn.classList.remove('offline-radio-active');
+            const label = radioBtn.querySelector('span');
+            const selectedArtist = this._offlineSelectedArtist;
+            if (label) label.textContent = selectedArtist ? `Start Radio — ${selectedArtist} only` : 'Start Radio with all tracks';
         }
     }
 
@@ -2323,7 +2324,7 @@ export class UIRenderer {
 
             radioBtn.onclick = async () => {
                 if (this._offlineRadioActive) {
-                    // Close fullscreen → which turns off radio and restores everything
+                    this.stopOfflineRadioPlayback();
                     this.closeFullscreenCover();
                     showNotification('Offline Radio stopped');
                     return;
