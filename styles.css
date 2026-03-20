@@ -8600,7 +8600,11 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
     width: 100%;
+    min-height: 48px;
     padding: 0.6rem 1rem;
     margin: 0.75rem 0;
     border: 1px dashed var(--border);
@@ -8613,6 +8617,7 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
     transition: all 0.2s ease;
     max-width: 100%;
     overflow: hidden;
+    pointer-events: auto;
 }
 
 .offline-radio-btn span {
