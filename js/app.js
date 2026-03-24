@@ -1,5 +1,6 @@
 //js/app.js
 import { isIos, isSafari } from './platform-detection.js';
+import { hapticLight } from './haptics.js';
 import { MusicAPI } from './music-api.js';
 import {
     apiSettings,
@@ -391,6 +392,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
     }
 
+    // Haptic feedback on every click
+    document.addEventListener('click', () => hapticLight(), { capture: true });
+
     // Initialize analytics
     initAnalytics();
 
@@ -407,7 +411,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     new ThemeStore();
-    await HiFiClient.initialize();
+    await HiFiClient.initialize({
+        storage: [
+            localStorage,
+            ...(import.meta.env.DEV
+                ? [
+                      {
+                          setItem: (key, value) => console.debug(`HiFiClient storage set: ${key} = ${value}`),
+                          removeItem: (key) => console.debug(`HiFiClient storage remove: ${key}`),
+                      },
+                  ]
+                : []),
+        ],
+        token: localStorage.getItem('hifi_token') || undefined,
+        tokenExpiry: parseInt(localStorage.getItem('hifi_token_expiry') || '0'),
+    });
+
     await MusicAPI.initialize(apiSettings);
 
     const audioPlayer = document.getElementById('audio-player');
@@ -425,6 +444,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
 
         removeHiRes(qualitySelect);
+        removeHiRes(downloadQualitySelect);
 
         if (isIos) {
             document.querySelector('#hi-res-download-warning').style.display = '';
