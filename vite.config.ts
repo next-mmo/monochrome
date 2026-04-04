@@ -34,6 +34,7 @@ export default defineConfig((_options) => {
             __VITEST__: !!process.env.VITEST,
         },
         worker: {
+            format: 'es',
         },
         resolve: {
             alias: {
