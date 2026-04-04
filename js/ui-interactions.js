@@ -66,7 +66,7 @@ export function initializeUIInteractions(player, api, ui) {
 
                 if (playlistId && folderId) {
                     const updatedFolder = await db.addPlaylistToFolder(folderId, playlistId);
-                    syncManager.syncUserFolder(updatedFolder, 'update');
+                    await syncManager.syncUserFolder(updatedFolder, 'update');
                     const subtitle = folderCard.querySelector('.card-subtitle');
                     if (subtitle) {
                         subtitle.textContent = `${updatedFolder.playlists.length} playlists`;
@@ -112,7 +112,7 @@ export function initializeUIInteractions(player, api, ui) {
     });
 
     // Queue panel
-    const renderQueueControls = (container) => {
+    const renderQueueControls = async (container) => {
         const currentQueue = player.getCurrentQueue();
         const showActionBtns = currentQueue.length > 0;
 
@@ -146,7 +146,7 @@ export function initializeUIInteractions(player, api, ui) {
         const downloadBtn = container.querySelector('#download-queue-btn');
         if (downloadBtn) {
             downloadBtn.addEventListener('click', async () => {
-                downloadTracks(currentQueue, api, downloadQualitySettings.getQuality());
+                await downloadTracks(currentQueue, api, downloadQualitySettings.getQuality());
             });
         }
 
@@ -269,7 +269,7 @@ export function initializeUIInteractions(player, api, ui) {
                 for (const track of currentQueue) {
                     const wasAdded = await db.toggleFavorite('track', track);
                     if (wasAdded) {
-                        syncManager.syncLibraryItem('track', track, true);
+                        await syncManager.syncLibraryItem('track', track, true);
                         addedCount++;
                     }
                 }
@@ -280,7 +280,7 @@ export function initializeUIInteractions(player, api, ui) {
                     showNotification('All tracks in queue are already liked');
                 }
 
-                refreshQueuePanel();
+                await refreshQueuePanel();
             });
         }
 
@@ -339,7 +339,7 @@ export function initializeUIInteractions(player, api, ui) {
                             }
 
                             const updatedPlaylist = await db.getPlaylist(playlistId);
-                            syncManager.syncUserPlaylist(updatedPlaylist, 'update');
+                            await syncManager.syncUserPlaylist(updatedPlaylist, 'update');
 
                             showNotification(`Added ${addedCount} tracks to playlist: ${playlistName}`);
                         } catch (error) {
@@ -355,9 +355,9 @@ export function initializeUIInteractions(player, api, ui) {
 
         const clearBtn = container.querySelector('#clear-queue-btn');
         if (clearBtn) {
-            clearBtn.addEventListener('click', () => {
+            clearBtn.addEventListener('click', async () => {
                 player.clearQueue();
-                refreshQueuePanel();
+                await refreshQueuePanel();
             });
         }
     };
@@ -400,7 +400,7 @@ export function initializeUIInteractions(player, api, ui) {
     `;
     };
 
-    const attachQueueListeners = (container) => {
+    const attachQueueListeners = async (container) => {
         if (container._queueListenersAttached) return;
 
         container.addEventListener('click', async (e) => {
@@ -412,7 +412,7 @@ export function initializeUIInteractions(player, api, ui) {
             if (removeBtn) {
                 e.stopPropagation();
                 player.removeFromQueue(index);
-                refreshQueuePanel();
+                await refreshQueuePanel();
                 return;
             }
 
@@ -422,12 +422,12 @@ export function initializeUIInteractions(player, api, ui) {
                 const track = player.getCurrentQueue()[index];
                 if (track) {
                     const added = await db.toggleFavorite('track', track);
-                    syncManager.syncLibraryItem('track', track, added);
+                    await syncManager.syncLibraryItem('track', track, added);
 
                     likeBtn.classList.toggle('active', added);
                     likeBtn.innerHTML = added ? SVG_HEART_FILLED(20) : SVG_HEART(20);
 
-                    hapticSuccess();
+                    await hapticSuccess();
                     showNotification(added ? `Added to Liked: ${track.title}` : `Removed from Liked: ${track.title}`);
                 }
                 return;
@@ -436,7 +436,7 @@ export function initializeUIInteractions(player, api, ui) {
             if (item.classList.contains('blocked')) return;
 
             player.playAtIndex(index);
-            refreshQueuePanel();
+            await refreshQueuePanel();
         });
 
         container.addEventListener('contextmenu', async (e) => {
@@ -486,14 +486,14 @@ export function initializeUIInteractions(player, api, ui) {
             e.preventDefault();
         });
 
-        container.addEventListener('drop', (e) => {
+        container.addEventListener('drop', async (e) => {
             e.preventDefault();
             const item = e.target.closest('.queue-track-item');
             if (item && draggedQueueIndex !== null) {
                 const index = parseInt(item.dataset.queueIndex);
                 if (draggedQueueIndex !== index) {
                     player.moveInQueue(draggedQueueIndex, index);
-                    refreshQueuePanel();
+                    await refreshQueuePanel();
                 }
             }
         });
@@ -501,7 +501,7 @@ export function initializeUIInteractions(player, api, ui) {
         container._queueListenersAttached = true;
     };
 
-    const renderQueueContent = (container, isUpdate = false) => {
+    const renderQueueContent = async (container, isUpdate = false) => {
         const currentQueue = player.getCurrentQueue();
 
         if (currentQueue.length === 0) {
@@ -512,7 +512,7 @@ export function initializeUIInteractions(player, api, ui) {
         }
 
         isQueueRendering = true;
-        attachQueueListeners(container);
+        await attachQueueListeners(container);
 
         if (currentQueue.length > QUEUE_VIRTUALIZATION_THRESHOLD) {
             if (!isUpdate) {
@@ -539,26 +539,26 @@ export function initializeUIInteractions(player, api, ui) {
             if (bottomObserver) bottomObserver.disconnect();
 
             bottomObserver = new IntersectionObserver(
-                (entries) => {
+                async (entries) => {
                     if (entries[0].isIntersecting && !isQueueRendering && queueEndIndex < currentQueue.length) {
                         queueEndIndex = Math.min(currentQueue.length, queueEndIndex + QUEUE_CHUNK_SIZE);
                         if (queueEndIndex - queueStartIndex > QUEUE_MAX_RENDERED) {
                             queueStartIndex += QUEUE_CHUNK_SIZE;
                         }
-                        renderQueueContent(container, true);
+                        await renderQueueContent(container, true);
                     }
                 },
                 { root: container, rootMargin: '200px' }
             );
 
             topObserver = new IntersectionObserver(
-                (entries) => {
+                async (entries) => {
                     if (entries[0].isIntersecting && !isQueueRendering && queueStartIndex > 0) {
                         queueStartIndex = Math.max(0, queueStartIndex - QUEUE_CHUNK_SIZE);
                         if (queueEndIndex - queueStartIndex > QUEUE_MAX_RENDERED) {
                             queueEndIndex -= QUEUE_CHUNK_SIZE;
                         }
-                        renderQueueContent(container, true);
+                        await renderQueueContent(container, true);
                     }
                 },
                 { root: container, rootMargin: '200px' }
@@ -586,8 +586,8 @@ export function initializeUIInteractions(player, api, ui) {
         isQueueRendering = false;
     };
 
-    const refreshQueuePanel = () => {
-        sidePanelManager.refresh('queue', renderQueueControls, renderQueueContent, { noClear: true });
+    const refreshQueuePanel = async () => {
+        await sidePanelManager.refresh('queue', renderQueueControls, renderQueueContent, { noClear: true });
     };
 
     const openQueuePanel = () => {
@@ -606,9 +606,9 @@ export function initializeUIInteractions(player, api, ui) {
     queueBtn.addEventListener('click', openQueuePanel);
 
     // Expose renderQueue for external updates (e.g. shuffle, add to queue)
-    window.renderQueueFunction = () => {
+    window.renderQueueFunction = async () => {
         if (sidePanelManager.isActive('queue')) {
-            refreshQueuePanel();
+            await refreshQueuePanel();
         }
 
         const overlay = document.getElementById('fullscreen-cover-overlay');
@@ -636,7 +636,7 @@ export function initializeUIInteractions(player, api, ui) {
             if (playlistId && folderId) {
                 try {
                     const updatedFolder = await db.addPlaylistToFolder(folderId, playlistId);
-                    syncManager.syncUserFolder(updatedFolder, 'update');
+                    await syncManager.syncUserFolder(updatedFolder, 'update');
                     window.dispatchEvent(new HashChangeEvent('hashchange'));
                     showNotification('Playlist added to folder');
                 } catch (error) {
@@ -679,9 +679,11 @@ export function initializeUIInteractions(player, api, ui) {
             document.getElementById(contentId)?.classList.add('active');
 
             // Save active tab
-            import('./storage.js').then(({ settingsUiState }) => {
-                settingsUiState.setActiveTab(tab.dataset.tab);
-            });
+            import('./storage.js')
+                .then(({ settingsUiState }) => {
+                    settingsUiState.setActiveTab(tab.dataset.tab);
+                })
+                .catch(console.error);
         });
     });
 

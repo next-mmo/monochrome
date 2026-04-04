@@ -1,4 +1,8 @@
 //js/app.js
+import discordSvg from '../images/discord.svg?svg&size=22';
+import googleSvg from '../images/google.svg?svg&size=22';
+import githubSvg from '../images/github.svg?svg&size=22';
+import spotifySvg from '../images/spotify.svg?svg&size=22';
 import { isIos, isSafari } from './platform-detection.js';
 import { hapticLight } from './haptics.js';
 import { MusicAPI } from './music-api.js';
@@ -251,7 +255,7 @@ function initializeKeyboardShortcuts(player, _audioPlayer) {
         },
         lyrics: () => {
             trackKeyboardShortcut('L');
-            document.querySelector('.now-playing-bar .cover')?.click();
+            document.getElementById('toggle-lyrics-btn')?.click();
         },
         search: () => {
             trackKeyboardShortcut('/');
@@ -410,6 +414,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         headerVersionBadge.textContent = `v${APP_VERSION}`;
     }
 
+    // Populate commit info
+    {
+        const repo = 'https://github.com/monochrome-music/monochrome';
+        // eslint-disable-next-line no-undef
+        const hash = typeof __COMMIT_HASH__ !== 'undefined' ? __COMMIT_HASH__ : 'dev';
+        const commitLink =
+            hash !== 'dev' && hash !== 'unknown'
+                ? `<a href="${repo}/commit/${hash}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">${hash}</a>`
+                : hash;
+        const repoLink = `<a href="${repo}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">monochrome-music/monochrome</a>`;
+        const html = `Commit ${commitLink} · ${repoLink}`;
+        const aboutEl = document.getElementById('about-commit-info');
+        const settingsEl = document.getElementById('settings-commit-info');
+        if (aboutEl) aboutEl.innerHTML = html;
+        if (settingsEl) settingsEl.innerHTML = html;
+    }
+
     new ThemeStore();
     await HiFiClient.initialize({
         storage: [
@@ -460,79 +481,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await Player.initialize(audioPlayer, MusicAPI.instance, currentQuality);
 
     // Initialize tracker
-    initTracker();
-
-    // Linux Media Keys Fix
-    if (window.NL_MODE) {
-        import('./desktop/neutralino-bridge.js').then(({ events }) => {
-            events.on('mediaNext', () => Player.instance.playNext());
-            events.on('mediaPrevious', () => Player.instance.playPrev());
-            events.on('mediaPlayPause', () => Player.instance.handlePlayPause());
-            events.on('mediaStop', () => {
-                const el = Player.instance.activeElement;
-                el.pause();
-                el.currentTime = 0;
-            });
-            console.log('Media keys initialized via bridge');
-        });
-    }
-
-    // Initialize desktop features if in Neutralino mode
-    if (
-        typeof window !== 'undefined' &&
-        (window.NL_MODE ||
-            window.location.search.includes('mode=neutralino') ||
-            window.location.search.includes('nl_port='))
-    ) {
-        window.NL_MODE = true;
-        try {
-            const desktopModule = await import('./desktop/desktop.js');
-            await desktopModule.initDesktop(Player.instance);
-
-            import('./desktop/neutralino-bridge.js').then(({ updater }) => {
-                setTimeout(async () => {
-                    try {
-                        // my worker should detect a users OS and serve the right ver
-                        const update = await updater.checkForUpdates('https://update.samidy.xyz/update.json');
-
-                        if (update && update.available) {
-                            const modal = document.getElementById('desktop-update-modal');
-                            const notes = document.getElementById('desktop-update-notes');
-                            const confirmBtn = document.getElementById('desktop-update-confirm');
-                            const cancelBtn = document.getElementById('desktop-update-cancel');
-
-                            if (modal) {
-                                notes.innerHTML = update.notes || 'Bug fixes and improvements.';
-                                modal.classList.add('active');
-
-                                confirmBtn.onclick = async () => {
-                                    confirmBtn.disabled = true;
-                                    confirmBtn.textContent = 'Updating...';
-                                    try {
-                                        await updater.install();
-                                    } catch (err) {
-                                        console.error(err);
-                                        confirmBtn.textContent = 'Failed';
-                                        setTimeout(() => {
-                                            confirmBtn.disabled = false;
-                                            confirmBtn.textContent = 'Update Now';
-                                        }, 2000);
-                                    }
-                                };
-
-                                cancelBtn.onclick = () => modal.classList.remove('active');
-                            }
-                        }
-                    } catch (e) {
-                        console.warn('Failed to check for desktop updates:', e);
-                    }
-                }, 3000);
-            });
-        } catch (err) {
-            console.error('Failed to load desktop module:', err);
-        }
-    }
-
+    initTracker().catch(console.error);
     const castBtn = document.getElementById('cast-btn');
     initializeCasting(audioPlayer, castBtn);
 
@@ -560,82 +509,41 @@ document.addEventListener('DOMContentLoaded', async () => {
             const handle = await db.getSetting('local_folder_handle');
             if (!handle) return;
 
-            const isNeutralino =
-                window.Neutralino && (window.NL_MODE || window.location.search.includes('mode=neutralino'));
             const tracks = (window.localFilesCache = []);
             let idCounter = 0;
             const { readTrackMetadata } = await loadMetadataModule();
 
-            if (isNeutralino) {
-                async function scanNeu(dirPath) {
-                    const entries = await window.Neutralino.filesystem.readDirectory(dirPath);
-                    for (const entry of entries) {
-                        if (entry.entry === '.' || entry.entry === '..') continue;
-                        const fullPath = `${dirPath}/${entry.entry}`;
-                        if (entry.type === 'FILE') {
-                            const name = entry.entry.toLowerCase();
-                            if (
-                                name.endsWith('.flac') ||
-                                name.endsWith('.mp3') ||
-                                name.endsWith('.m4a') ||
-                                name.endsWith('.wav') ||
-                                name.endsWith('.ogg')
-                            ) {
-                                try {
-                                    const buffer = await window.Neutralino.filesystem.readBinaryFile(fullPath);
-                                    const stats = await window.Neutralino.filesystem.getStats(fullPath);
-                                    const file = new File([buffer], entry.entry, { lastModified: stats.mtime });
-                                    const metadata = await readTrackMetadata(file);
-                                    metadata.id = `local-${idCounter++}-${entry.entry}`;
-                                    tracks.push(metadata);
-                                    UIRenderer.instance.renderLocalFiles(
-                                        document.getElementById('library-local-container')
-                                    );
-                                } catch (e) {
-                                    console.error('Failed to read file:', fullPath, e);
-                                }
-                            }
-                        } else if (entry.type === 'DIRECTORY') {
-                            await scanNeu(fullPath);
-                        }
-                    }
-                }
-                await scanNeu(handle.path);
-            } else {
-                // Request read permission before iterating. When the browser has
-                // already granted it (e.g. within the same session or via a
-                // persistent grant) this succeeds without a user gesture.
-                if (typeof handle.requestPermission === 'function') {
-                    const permission = await handle.requestPermission({ mode: 'read' });
-                    if (permission !== 'granted') return;
-                }
-
-                async function scanBrowser(dirHandle) {
-                    for await (const entry of dirHandle.values()) {
-                        if (entry.kind === 'file') {
-                            const name = entry.name.toLowerCase();
-                            if (
-                                name.endsWith('.flac') ||
-                                name.endsWith('.mp3') ||
-                                name.endsWith('.m4a') ||
-                                name.endsWith('.wav') ||
-                                name.endsWith('.ogg')
-                            ) {
-                                const file = await entry.getFile();
-                                const metadata = await readTrackMetadata(file);
-                                metadata.id = `local-${idCounter++}-${file.name}`;
-                                tracks.push(metadata);
-                                UIRenderer.instance.renderLocalFiles(
-                                    document.getElementById('library-local-container')
-                                );
-                            }
-                        } else if (entry.kind === 'directory') {
-                            await scanBrowser(entry);
-                        }
-                    }
-                }
-                await scanBrowser(handle);
+            // Request read permission before iterating. When the browser has
+            // already granted it (e.g. within the same session or via a
+            // persistent grant) this succeeds without a user gesture.
+            if (typeof handle.requestPermission === 'function') {
+                const permission = await handle.requestPermission({ mode: 'read' });
+                if (permission !== 'granted') return;
             }
+
+            async function scanBrowser(dirHandle) {
+                for await (const entry of dirHandle.values()) {
+                    if (entry.kind === 'file') {
+                        const name = entry.name.toLowerCase();
+                        if (
+                            name.endsWith('.flac') ||
+                            name.endsWith('.mp3') ||
+                            name.endsWith('.m4a') ||
+                            name.endsWith('.wav') ||
+                            name.endsWith('.ogg')
+                        ) {
+                            const file = await entry.getFile();
+                            const metadata = await readTrackMetadata(file);
+                            metadata.id = `local-${idCounter++}-${file.name}`;
+                            tracks.push(metadata);
+                            UIRenderer.instance.renderLocalFiles(document.getElementById('library-local-container'));
+                        }
+                    } else if (entry.kind === 'directory') {
+                        await scanBrowser(entry);
+                    }
+                }
+            }
+            await scanBrowser(handle);
 
             tracks.sort((a, b) => (a.artist.name || '').localeCompare(b.artist.name || ''));
             // Update only the local-files section without navigating to the library page.
@@ -653,8 +561,8 @@ document.addEventListener('DOMContentLoaded', async () => {
      * having to manually re-scan.
      *
      * When called with a `blob` and `filename` (single-track download case) it
-     * performs a cheap partial update — reading metadata only from that one file
-     * and inserting it into the existing cache — so the full folder does not need
+     * performs a cheap partial update - reading metadata only from that one file
+     * and inserting it into the existing cache - so the full folder does not need
      * to be re-walked.  When called with no arguments (bulk download case, or when
      * `localFilesCache` has never been populated) it falls back to a full rescan.
      */
@@ -688,7 +596,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // checks for a saved handle and (in browser mode) requests read permission,
     // so this is a silent no-op when no folder is configured or permission is not
     // yet granted.
-    scanLocalMediaFolder();
+    scanLocalMediaFolder().catch(console.error);
 
     const scrobbler = new MultiScrobbler();
     window.monochromeScrobbler = scrobbler;
@@ -704,17 +612,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const ua = navigator.userAgent;
         const isChromeOrEdge = (ua.indexOf('Chrome') > -1 || ua.indexOf('Edg') > -1) && !/Mobile|Android/.test(ua);
         const hasFileSystemApi = 'showDirectoryPicker' in window;
-        const isNeutralino =
-            window.NL_MODE ||
-            window.location.search.includes('mode=neutralino') ||
-            window.location.search.includes('nl_port=');
 
-        if (!isNeutralino && (!isChromeOrEdge || !hasFileSystemApi)) {
+        if (!isChromeOrEdge || !hasFileSystemApi) {
             selectLocalBtn.style.display = 'none';
             browserWarning.style.display = 'block';
-        } else if (isNeutralino) {
-            selectLocalBtn.style.display = 'flex';
-            browserWarning.style.display = 'none';
         }
     }
 
@@ -1125,9 +1026,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    document.getElementById('download-current-btn')?.addEventListener('click', () => {
+    document.getElementById('download-current-btn')?.addEventListener('click', async () => {
         if (Player.instance.currentTrack) {
-            handleTrackAction(
+            await handleTrackAction(
                 'download',
                 Player.instance.currentTrack,
                 Player.instance,
@@ -1360,8 +1261,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             try {
                 const { mix, tracks } = await MusicAPI.instance.getMix(mixId);
-                const { downloadPlaylistAsZip } = await loadDownloadsModule();
-                await downloadPlaylistAsZip(
+                const { downloadPlaylist } = await loadDownloadsModule();
+                await downloadPlaylist(
                     mix,
                     tracks,
                     MusicAPI.instance,
@@ -1409,8 +1310,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                     tracks = data.tracks;
                 }
 
-                const { downloadPlaylistAsZip } = await loadDownloadsModule();
-                await downloadPlaylistAsZip(
+                const { downloadPlaylist } = await loadDownloadsModule();
+                await downloadPlaylist(
                     playlist,
                     tracks,
                     MusicAPI.instance,
@@ -1426,7 +1327,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
-        if (e.target.closest('#create-playlist-btn')) {
+        if (e.target.closest('#create-playlist-btn') || e.target.closest('#library-create-playlist-card')) {
             trackOpenModal('Create Playlist');
             const modal = document.getElementById('playlist-modal');
             document.getElementById('playlist-modal-title').textContent = 'Create Playlist';
@@ -1480,7 +1381,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             document.getElementById('playlist-name-input').focus();
         }
 
-        if (e.target.closest('#create-folder-btn')) {
+        if (e.target.closest('#create-folder-btn') || e.target.closest('#library-create-folder-card')) {
             trackOpenModal('Create Folder');
             const modal = document.getElementById('folder-modal');
             document.getElementById('folder-name-input').value = '';
@@ -1507,6 +1408,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (e.target.closest('#folder-modal-cancel')) {
             document.getElementById('folder-modal').classList.remove('active');
+        }
+
+        if (e.target.closest('#library-liked-tracks-view-list')) {
+            localStorage.setItem('libraryLikedTracksView', 'list');
+            if (window.location.pathname.split('/').filter(Boolean)[0] === 'library') {
+                await UIRenderer.instance.renderLibraryPage();
+            }
+        }
+        if (e.target.closest('#library-liked-tracks-view-grid')) {
+            localStorage.setItem('libraryLikedTracksView', 'grid');
+            if (window.location.pathname.split('/').filter(Boolean)[0] === 'library') {
+                await UIRenderer.instance.renderLibraryPage();
+            }
         }
 
         if (e.target.closest('#delete-folder-btn')) {
@@ -1551,14 +1465,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (editingId) {
                     // Edit
                     const cover = document.getElementById('playlist-cover-input').value.trim();
-                    db.getPlaylist(editingId).then(async (playlist) => {
+                    await db.getPlaylist(editingId).then(async (playlist) => {
                         if (playlist) {
                             playlist.name = name;
                             playlist.cover = cover;
                             playlist.description = description;
                             await handlePublicStatus(playlist);
                             await db.performTransaction('user_playlists', 'readwrite', (store) => store.put(playlist));
-                            syncManager.syncUserPlaylist(playlist, 'update');
+                            await syncManager.syncUserPlaylist(playlist, 'update');
                             UIRenderer.instance.renderLibraryPage();
                             // Also update current page if we are on it
                             if (window.location.pathname === `/userplaylist/${editingId}`) {
@@ -2079,7 +1993,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         console.log(`Added ${tracks.length} tracks (including pending)`);
                     }
 
-                    db.createPlaylist(name, tracks, cover, description).then(async (playlist) => {
+                    await db.createPlaylist(name, tracks, cover, description).then(async (playlist) => {
                         await handlePublicStatus(playlist);
                         // Update DB again with isPublic flag
                         await db.performTransaction('user_playlists', 'readwrite', (store) => store.put(playlist));
@@ -2102,7 +2016,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (e.target.closest('.edit-playlist-btn')) {
             const card = e.target.closest('.user-playlist');
             const playlistId = card.dataset.userPlaylistId;
-            db.getPlaylist(playlistId).then(async (playlist) => {
+            await db.getPlaylist(playlistId).then(async (playlist) => {
                 if (playlist) {
                     const modal = document.getElementById('playlist-modal');
                     document.getElementById('playlist-modal-title').textContent = 'Edit Playlist';
@@ -2122,7 +2036,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                         shareBtn.style.display = playlist.isPublic ? 'flex' : 'none';
                         shareBtn.onclick = () => {
                             const url = getShareUrl(`/userplaylist/${playlist.id}`);
-                            navigator.clipboard.writeText(url).then(() => alert('Link copied to clipboard!'));
+                            navigator.clipboard
+                                .writeText(url)
+                                .then(() => alert('Link copied to clipboard!'))
+                                .catch(console.error);
                         };
                     }
 
@@ -2161,73 +2078,77 @@ document.addEventListener('DOMContentLoaded', async () => {
             const card = e.target.closest('.user-playlist');
             const playlistId = card.dataset.userPlaylistId;
             if (confirm('Are you sure you want to delete this playlist?')) {
-                db.deletePlaylist(playlistId).then(() => {
-                    syncManager.syncUserPlaylist({ id: playlistId }, 'delete');
-                    UIRenderer.instance.renderLibraryPage();
-                });
+                await db.deletePlaylist(playlistId);
+                await syncManager.syncUserPlaylist({ id: playlistId }, 'delete');
+                UIRenderer.instance.renderLibraryPage();
             }
         }
 
         if (e.target.closest('#edit-playlist-btn')) {
             const playlistId = window.location.pathname.split('/')[2];
-            db.getPlaylist(playlistId).then((playlist) => {
-                if (playlist) {
-                    const modal = document.getElementById('playlist-modal');
-                    document.getElementById('playlist-modal-title').textContent = 'Edit Playlist';
-                    document.getElementById('playlist-name-input').value = playlist.name;
-                    document.getElementById('playlist-cover-input').value = playlist.cover || '';
-                    document.getElementById('playlist-description-input').value = playlist.description || '';
+            await db
+                .getPlaylist(playlistId)
+                .then((playlist) => {
+                    if (playlist) {
+                        const modal = document.getElementById('playlist-modal');
+                        document.getElementById('playlist-modal-title').textContent = 'Edit Playlist';
+                        document.getElementById('playlist-name-input').value = playlist.name;
+                        document.getElementById('playlist-cover-input').value = playlist.cover || '';
+                        document.getElementById('playlist-description-input').value = playlist.description || '';
 
-                    const publicToggle = document.getElementById('playlist-public-toggle');
-                    const shareBtn = document.getElementById('playlist-share-btn');
+                        const publicToggle = document.getElementById('playlist-public-toggle');
+                        const shareBtn = document.getElementById('playlist-share-btn');
 
-                    if (publicToggle) publicToggle.checked = !!playlist.isPublic;
-                    if (shareBtn) {
-                        shareBtn.style.display = playlist.isPublic ? 'flex' : 'none';
-                        shareBtn.onclick = () => {
-                            const url = getShareUrl(`/userplaylist/${playlist.id}`);
-                            navigator.clipboard.writeText(url).then(() => alert('Link copied to clipboard!'));
-                        };
+                        if (publicToggle) publicToggle.checked = !!playlist.isPublic;
+                        if (shareBtn) {
+                            shareBtn.style.display = playlist.isPublic ? 'flex' : 'none';
+                            shareBtn.onclick = async () => {
+                                const url = getShareUrl(`/userplaylist/${playlist.id}`);
+                                await navigator.clipboard
+                                    .writeText(url)
+                                    .then(() => alert('Link copied to clipboard!'))
+                                    .catch(console.error);
+                            };
+                        }
+
+                        // Set cover upload state - show URL input if there's an existing cover
+                        const coverUploadBtn = document.getElementById('playlist-cover-upload-btn');
+                        const coverUrlInput = document.getElementById('playlist-cover-input');
+                        const coverToggleUrlBtn = document.getElementById('playlist-cover-toggle-url-btn');
+                        if (playlist.cover) {
+                            if (coverUploadBtn) coverUploadBtn.style.display = 'none';
+                            if (coverUrlInput) coverUrlInput.style.display = 'block';
+                            if (coverToggleUrlBtn) {
+                                coverToggleUrlBtn.textContent = 'Upload';
+                                coverToggleUrlBtn.title = 'Switch to file upload';
+                            }
+                        } else {
+                            if (coverUploadBtn) {
+                                coverUploadBtn.style.flex = '1';
+                                coverUploadBtn.style.display = 'flex';
+                            }
+                            if (coverUrlInput) coverUrlInput.style.display = 'none';
+                            if (coverToggleUrlBtn) {
+                                coverToggleUrlBtn.textContent = 'or URL';
+                                coverToggleUrlBtn.title = 'Switch to URL input';
+                            }
+                        }
+
+                        modal.dataset.editingId = playlistId;
+                        document.getElementById('import-section').style.display = 'none';
+                        modal.classList.add('active');
+                        document.getElementById('playlist-name-input').focus();
                     }
-
-                    // Set cover upload state - show URL input if there's an existing cover
-                    const coverUploadBtn = document.getElementById('playlist-cover-upload-btn');
-                    const coverUrlInput = document.getElementById('playlist-cover-input');
-                    const coverToggleUrlBtn = document.getElementById('playlist-cover-toggle-url-btn');
-                    if (playlist.cover) {
-                        if (coverUploadBtn) coverUploadBtn.style.display = 'none';
-                        if (coverUrlInput) coverUrlInput.style.display = 'block';
-                        if (coverToggleUrlBtn) {
-                            coverToggleUrlBtn.textContent = 'Upload';
-                            coverToggleUrlBtn.title = 'Switch to file upload';
-                        }
-                    } else {
-                        if (coverUploadBtn) {
-                            coverUploadBtn.style.flex = '1';
-                            coverUploadBtn.style.display = 'flex';
-                        }
-                        if (coverUrlInput) coverUrlInput.style.display = 'none';
-                        if (coverToggleUrlBtn) {
-                            coverToggleUrlBtn.textContent = 'or URL';
-                            coverToggleUrlBtn.title = 'Switch to URL input';
-                        }
-                    }
-
-                    modal.dataset.editingId = playlistId;
-                    document.getElementById('import-section').style.display = 'none';
-                    modal.classList.add('active');
-                    document.getElementById('playlist-name-input').focus();
-                }
-            });
+                })
+                .catch(console.error);
         }
 
         if (e.target.closest('#delete-playlist-btn')) {
             const playlistId = window.location.pathname.split('/')[2];
             if (confirm('Are you sure you want to delete this playlist?')) {
-                db.deletePlaylist(playlistId).then(() => {
-                    syncManager.syncUserPlaylist({ id: playlistId }, 'delete');
-                    navigate('/library');
-                });
+                await db.deletePlaylist(playlistId);
+                await syncManager.syncUserPlaylist({ id: playlistId }, 'delete');
+                navigate('/library');
             }
         }
 
@@ -2236,7 +2157,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const btn = e.target.closest('.remove-from-playlist-btn');
             const playlistId = window.location.pathname.split('/')[2];
 
-            db.getPlaylist(playlistId).then(async (playlist) => {
+            await db.getPlaylist(playlistId).then(async (playlist) => {
                 let trackId = null;
                 let trackType = null;
 
@@ -2255,7 +2176,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 if (trackId) {
                     const updatedPlaylist = await db.removeTrackFromPlaylist(playlistId, trackId, trackType);
-                    syncManager.syncUserPlaylist(updatedPlaylist, 'update');
+                    await syncManager.syncUserPlaylist(updatedPlaylist, 'update');
                     const scrollTop = document.querySelector('.main-content').scrollTop;
                     await UIRenderer.instance.renderPlaylistPage(playlistId, 'user');
                     document.querySelector('.main-content').scrollTop = scrollTop;
@@ -2313,8 +2234,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             try {
                 const { album, tracks } = await MusicAPI.instance.getAlbum(albumId);
-                const { downloadAlbumAsZip } = await loadDownloadsModule();
-                await downloadAlbumAsZip(
+                const { downloadAlbum } = await loadDownloadsModule();
+                await downloadAlbum(
                     album,
                     tracks,
                     MusicAPI.instance,
@@ -2576,22 +2497,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (e.target.closest('#select-local-folder-btn') || e.target.closest('#change-local-folder-btn')) {
             const isChange = e.target.closest('#change-local-folder-btn') !== null;
             try {
-                const isNeutralino =
-                    window.Neutralino && (window.NL_MODE || window.location.search.includes('mode=neutralino'));
-                let handle;
-                let path;
-
-                if (isNeutralino) {
-                    path = await window.Neutralino.os.showFolderDialog('Select Music Folder');
-                    if (!path) return;
-                    // Mock a handle object for UI compatibility
-                    handle = { name: path.split(/[/\\]/).pop() || path, isNeutralino: true, path };
-                } else {
-                    handle = await window.showDirectoryPicker({
-                        id: 'music-folder',
-                        mode: 'read',
-                    });
-                }
+                const handle = await window.showDirectoryPicker({
+                    id: 'music-folder',
+                    mode: 'read',
+                });
 
                 await db.saveSetting('local_folder_handle', handle);
                 if (isChange) {
@@ -2788,7 +2697,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // PWA Update Logic
     if (window.__AUTH_GATE__) {
-        disablePwaForAuthGate();
+        await disablePwaForAuthGate().catch(console.error);
     } else {
         const updateSW = registerSW({
             onRegisteredSW(swUrl, registration) {
@@ -2881,8 +2790,122 @@ document.addEventListener('DOMContentLoaded', async () => {
         observer.observe(contextMenu, { attributes: true });
     }
 
-
     // Header account button removed — version badge shown instead
+    // Temporarily disable accounts - show popup
+    const isAccountsDisabled = false;
+
+    if (headerAccountBtn && headerAccountDropdown) {
+        if (isAccountsDisabled) {
+            headerAccountBtn.style.opacity = '0.5';
+            headerAccountBtn.style.cursor = 'not-allowed';
+            headerAccountBtn.title = 'Accounts temporarily unavailable';
+            headerAccountBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                alert(
+                    "We're moving authentication and data storing systems.\n\nAccounts, profiles, playlists, and community themes will not work during this period (approximately 2 days).\n\nYou will need to re-login after the migration is complete."
+                );
+            });
+        } else {
+            headerAccountBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                headerAccountDropdown.classList.toggle('active');
+                await updateAccountDropdown();
+            });
+        }
+
+        document.addEventListener('click', (e) => {
+            if (!headerAccountBtn.contains(e.target) && !headerAccountDropdown.contains(e.target)) {
+                headerAccountDropdown.classList.remove('active');
+            }
+        });
+
+        async function updateAccountDropdown() {
+            const user = authManager?.user;
+            headerAccountDropdown.innerHTML = '';
+
+            if (!user) {
+                const iconBtnStyle =
+                    'background:none;border:none;cursor:pointer;padding:4px;border-radius:6px;display:flex;align-items:center;transition:opacity 0.15s';
+                headerAccountDropdown.innerHTML = `
+                    <span style="font-size:0.75rem;color:var(--muted-foreground);padding:0.25rem 0.5rem">Connect with</span>
+                    <div style="display:flex;gap:0.5rem;padding:0.25rem 0.5rem;align-items:center">
+                        <button id="header-discord-auth" title="Discord" style="${iconBtnStyle}">${discordSvg}</button>
+                        <button id="header-google-auth" title="Google" style="${iconBtnStyle}">${googleSvg}</button>
+                        <button id="header-github-auth" title="GitHub" style="${iconBtnStyle}">${githubSvg}</button>
+                        <button id="header-spotify-auth" title="Spotify" style="${iconBtnStyle}">${spotifySvg}</button>
+                    </div>
+                    <hr style="border:none;border-top:1px solid var(--border);margin:0.25rem 0">
+                    <button class="btn-secondary" id="header-email-auth">Connect with Email</button>
+                `;
+
+                for (const id of [
+                    'header-discord-auth',
+                    'header-google-auth',
+                    'header-github-auth',
+                    'header-spotify-auth',
+                ]) {
+                    const btn = document.getElementById(id);
+                    const svg = btn.querySelector('svg');
+                    svg.style.filter = 'brightness(0) invert(1)';
+                    svg.style.transition = 'filter 0.15s';
+                    btn.addEventListener('mouseenter', () => {
+                        svg.style.filter = 'brightness(0) invert(0.5)';
+                    });
+                    btn.addEventListener('mouseleave', () => {
+                        svg.style.filter = 'brightness(0) invert(1)';
+                    });
+                }
+
+                document.getElementById('header-google-auth').onclick = () => authManager.signInWithGoogle();
+                document.getElementById('header-github-auth').onclick = () => authManager.signInWithGitHub();
+                document.getElementById('header-discord-auth').onclick = () => authManager.signInWithDiscord();
+                document.getElementById('header-spotify-auth').onclick = () => authManager.signInWithSpotify();
+                document.getElementById('header-email-auth').onclick = () => {
+                    document.getElementById('email-auth-modal').classList.add('active');
+                    headerAccountDropdown.classList.remove('active');
+                };
+            } else {
+                const data = await syncManager.getUserData();
+                const hasProfile = data && data.profile && data.profile.username;
+
+                if (hasProfile) {
+                    headerAccountDropdown.innerHTML = `
+                        <button class="btn-secondary" id="header-view-profile">My Profile</button>
+                        <button class="btn-secondary danger" id="header-sign-out">Sign Out</button>
+                    `;
+                    document.getElementById('header-view-profile').onclick = () => {
+                        navigate(`/user/@${data.profile.username}`);
+                        headerAccountDropdown.classList.remove('active');
+                    };
+                } else {
+                    headerAccountDropdown.innerHTML = `
+                        <button class="btn-primary" id="header-create-profile">Create Profile</button>
+                        <button class="btn-secondary danger" id="header-sign-out">Sign Out</button>
+                    `;
+                    document.getElementById('header-create-profile').onclick = async () => {
+                        openEditProfile().catch(console.error);
+                        headerAccountDropdown.classList.remove('active');
+                    };
+                }
+
+                document.getElementById('header-sign-out').onclick = () => authManager.signOut();
+            }
+        }
+
+        authManager.onAuthStateChanged(async (user) => {
+            if (user) {
+                const data = await syncManager.getUserData();
+                if (data && data.profile && data.profile.avatar_url) {
+                    headerAccountImg.src = data.profile.avatar_url;
+                    headerAccountImg.style.display = 'block';
+                    headerAccountIcon.style.display = 'none';
+                    return;
+                }
+            }
+            headerAccountImg.style.display = 'none';
+            headerAccountIcon.style.display = 'flex';
+        });
+    }
 });
 
 function showUpdateNotification(updateCallback) {
@@ -2948,7 +2971,7 @@ function showMissingTracksNotification(missingTracks, playlistName) {
         const newCopyBtn = copyBtn.cloneNode(true);
         copyBtn.parentNode.replaceChild(newCopyBtn, copyBtn);
 
-        newCopyBtn.addEventListener('click', () => {
+        newCopyBtn.addEventListener('click', async () => {
             const header = `Missing songs from ${playlistName} import:\n\n`;
             const textToCopy =
                 header +
@@ -2960,11 +2983,14 @@ function showMissingTracksNotification(missingTracks, playlistName) {
                     })
                     .join('\n');
 
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                const originalText = newCopyBtn.textContent;
-                newCopyBtn.textContent = 'Copied!';
-                setTimeout(() => (newCopyBtn.textContent = originalText), 2000);
-            });
+            await navigator.clipboard
+                .writeText(textToCopy)
+                .then(async () => {
+                    const originalText = newCopyBtn.textContent;
+                    newCopyBtn.textContent = 'Copied!';
+                    setTimeout(() => (newCopyBtn.textContent = originalText), 2000);
+                })
+                .catch(console.error);
         });
     }
 

@@ -1,19 +1,39 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
-import neutralino from 'vite-plugin-neutralino';
 import authGatePlugin from './vite-plugin-auth-gate.js';
 import path from 'path';
 import uploadPlugin from './vite-plugin-upload.js';
 import blobAssetPlugin from './vite-plugin-blob.js';
 import svgUse from './vite-plugin-svg-use.js';
+import { execSync } from 'child_process';
+import { playwright } from '@vitest/browser-playwright';
 
-export default defineConfig(({ mode }) => {
-    const IS_NEUTRALINO = mode === 'neutralino';
+function getGitCommitHash() {
+    try {
+        return execSync('git rev-parse --short HEAD').toString().trim();
+    } catch {
+        return 'unknown';
+    }
+}
 
+export default defineConfig((_options) => {
+    const commitHash = getGitCommitHash();
     return {
-        base: IS_NEUTRALINO ? './' : '/',
+        test: {
+            // https://vitest.dev/guide/browser/
+            browser: {
+                enabled: true,
+                provider: playwright(),
+                headless: !!process.env.HEADLESS,
+                instances: [{ browser: 'chromium' }],
+            },
+        },
+        base: typeof IS_NEUTRALINO !== 'undefined' && IS_NEUTRALINO ? './' : './',
+        define: {
+            __COMMIT_HASH__: JSON.stringify(commitHash),
+            __VITEST__: !!process.env.VITEST,
+        },
         worker: {
-            format: 'es',
         },
         resolve: {
             alias: {
@@ -46,7 +66,6 @@ export default defineConfig(({ mode }) => {
             sourcemap: true,
         },
         plugins: [
-            IS_NEUTRALINO && neutralino(),
             authGatePlugin(),
             uploadPlugin(),
             blobAssetPlugin(),
