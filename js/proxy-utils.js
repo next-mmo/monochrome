@@ -179,7 +179,7 @@ async function _retryFetch(url, fetchOptions, { maxRetries, baseDelay, retryable
                 const delayMs = _jitteredDelay(baseDelay, attempt);
                 console.warn(
                     `Request failed (${response.status}), retrying in ${Math.round(delayMs)}ms... ` +
-                    `(attempt ${attempt + 1}/${maxRetries})`
+                        `(attempt ${attempt + 1}/${maxRetries})`
                 );
                 await new Promise((r) => setTimeout(r, delayMs));
                 continue;
@@ -195,7 +195,7 @@ async function _retryFetch(url, fetchOptions, { maxRetries, baseDelay, retryable
                 const delayMs = _jitteredDelay(baseDelay, attempt);
                 console.warn(
                     `Request error: ${err.message}, retrying in ${Math.round(delayMs)}ms... ` +
-                    `(attempt ${attempt + 1}/${maxRetries})`
+                        `(attempt ${attempt + 1}/${maxRetries})`
                 );
                 await new Promise((r) => setTimeout(r, delayMs));
                 continue;

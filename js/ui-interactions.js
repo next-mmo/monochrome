@@ -172,12 +172,14 @@ export function initializeUIInteractions(player, api, ui) {
                 }
 
                 // Create progress notification
-                const notifContainer = document.getElementById('download-notifications') || (() => {
-                    const c = document.createElement('div');
-                    c.id = 'download-notifications';
-                    document.body.appendChild(c);
-                    return c;
-                })();
+                const notifContainer =
+                    document.getElementById('download-notifications') ||
+                    (() => {
+                        const c = document.createElement('div');
+                        c.id = 'download-notifications';
+                        document.body.appendChild(c);
+                        return c;
+                    })();
 
                 const taskEl = document.createElement('div');
                 taskEl.className = 'download-task';
@@ -223,7 +225,9 @@ export function initializeUIInteractions(player, api, ui) {
                             try {
                                 const coverRes = await fetch(coverSrc);
                                 if (coverRes.ok) coverBlob = await coverRes.blob();
-                            } catch { /* ignore cover fetch failure */ }
+                            } catch {
+                                /* ignore cover fetch failure */
+                            }
                         }
 
                         await saveOfflineTrack(track, blob, coverBlob);

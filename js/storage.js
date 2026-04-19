@@ -2584,18 +2584,18 @@ export const sidebarSectionSettings = {
         const safeOrder = Array.isArray(order) ? order.filter((id) => baseOrder.includes(id)) : [];
         const uniqueOrder = [...new Set(safeOrder)];
         let missing = baseOrder.filter((id) => !uniqueOrder.includes(id));
-        
+
         let result = [...uniqueOrder];
-        
+
         // Force offline below home if it was missing from the user's customized layout
         if (missing.includes('sidebar-nav-offline')) {
             const homeIndex = result.indexOf('sidebar-nav-home');
             if (homeIndex !== -1) {
                 result.splice(homeIndex + 1, 0, 'sidebar-nav-offline');
-                missing = missing.filter(id => id !== 'sidebar-nav-offline');
+                missing = missing.filter((id) => id !== 'sidebar-nav-offline');
             }
         }
-        
+
         return [...result, ...missing];
     },
 
