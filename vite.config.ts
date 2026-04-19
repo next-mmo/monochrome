@@ -14,7 +14,86 @@ function proxyAudioPlugin() {
     return {
         name: 'proxy-audio-dev',
         configureServer(server) {
-            // No longer needed: local proxy-audio middleware replaced by remote proxy
+            server.middlewares.use('/proxy-audio', async (req, res) => {
+                const url = new URL(req.url, `http://${req.headers.host}`);
+                const targetUrl = url.searchParams.get('url');
+
+                if (!targetUrl) {
+                    res.writeHead(400, { 'Content-Type': 'text/plain' });
+                    res.end('Missing url parameter');
+                    return;
+                }
+
+                try {
+                    // Forward the request method (GET, HEAD, etc.)
+                    const fetchOptions = {
+                        method: req.method || 'GET',
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        },
+                    };
+
+                    // Forward range headers for seeking support
+                    if (req.headers.range) {
+                        fetchOptions.headers['Range'] = req.headers.range;
+                    }
+
+                    const response = await fetch(targetUrl, fetchOptions);
+
+                    // Set CORS headers
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+                    res.setHeader('Access-Control-Allow-Headers', 'Range');
+                    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Content-Type');
+
+                    // Forward response headers
+                    const contentType = response.headers.get('content-type');
+                    if (contentType) res.setHeader('Content-Type', contentType);
+
+                    const contentLength = response.headers.get('content-length');
+                    if (contentLength) res.setHeader('Content-Length', contentLength);
+
+                    const contentRange = response.headers.get('content-range');
+                    if (contentRange) res.setHeader('Content-Range', contentRange);
+
+                    const acceptRanges = response.headers.get('accept-ranges');
+                    if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
+
+                    res.writeHead(response.status);
+
+                    if (req.method === 'HEAD') {
+                        res.end();
+                        return;
+                    }
+
+                    // Stream the response body
+                    if (response.body) {
+                        const reader = response.body.getReader();
+                        const pump = async () => {
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                res.write(Buffer.from(value));
+                            }
+                            res.end();
+                        };
+                        pump().catch((err) => {
+                            console.error('Proxy stream error:', err.message);
+                            if (!res.headersSent) res.writeHead(502);
+                            res.end();
+                        });
+                    } else {
+                        const buffer = await response.arrayBuffer();
+                        res.end(Buffer.from(buffer));
+                    }
+                } catch (err) {
+                    console.error('Proxy fetch error:', err.message);
+                    if (!res.headersSent) {
+                        res.writeHead(502, { 'Content-Type': 'text/plain' });
+                    }
+                    res.end(`Proxy error: ${err.message}`);
+                }
+            });
         },
     };
 }

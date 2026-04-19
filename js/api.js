@@ -11,7 +11,7 @@ import { preferDolbyAtmosSettings, trackDateSettings, devModeSettings } from './
 import { APICache } from './cache.js';
 import { DashDownloader } from './dash-downloader.ts';
 import { HlsDownloader } from './hls-downloader.js';
-import { getProxyUrl } from './proxy-utils.js';
+import { getProxyUrl, fetchWithProxyRetry } from './proxy-utils.js';
 import { loadFfmpeg, FfmpegError, ffmpeg } from './ffmpeg.js';
 import { triggerDownload, applyAudioPostProcessing } from './download-utils.ts';
 import { isCustomFormat } from './ffmpegFormats.ts';
@@ -1769,7 +1769,7 @@ export class LosslessAPI {
             if (streamUrl.startsWith('blob:')) {
                 try {
                     const downloader = new DashDownloader();
-                    blob = await downloader.downloadDashStream(getProxyUrl(streamUrl), {
+                    blob = await downloader.downloadDashStream(streamUrl, {
                         signal: options.signal,
                         onProgress,
                         calculateDashBytes: calculateDashBytes ?? true,
@@ -1813,13 +1813,22 @@ export class LosslessAPI {
                     /* ignore HEAD failure; proceed with GET */
                 }
 
-                const response = await fetch(getProxyUrl(streamUrl), {
-                    cache: 'no-store',
-                    signal: options.signal,
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Fetch failed: ${response.status}`);
+                let response;
+                try {
+                    response = await fetchWithProxyRetry(getProxyUrl(streamUrl), {
+                        cache: 'no-store',
+                        signal: options.signal,
+                    });
+                } catch (proxyError) {
+                    // Proxy exhausted retries — try direct fetch as fallback
+                    console.warn('Proxy failed after retries, trying direct fetch:', proxyError.message);
+                    response = await fetch(streamUrl, {
+                        cache: 'no-store',
+                        signal: options.signal,
+                    });
+                    if (!response.ok) {
+                        throw new Error(`Direct fetch also failed: ${response.status}`);
+                    }
                 }
 
                 const contentLengthHeader = response.headers.get('Content-Length');

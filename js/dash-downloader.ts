@@ -1,5 +1,6 @@
 import { AbortError } from './errorTypes';
 import { SegmentedDownloadProgress } from './progressEvents';
+import { getProxyUrl, fetchWithProxyRetry } from './proxy-utils.js';
 
 export interface DashDownloadOptions {
     onProgress?: MonochromeProgressListener<SegmentedDownloadProgress>;
@@ -30,14 +31,10 @@ export class DashDownloader {
 
             await Promise.all(
                 urls.map(async (url) => {
-                    const result = await fetch(getProxyUrl(url), { method: 'HEAD', signal });
+                    const result = await fetchWithProxyRetry(getProxyUrl(url), { method: 'HEAD', signal });
 
-                    if (result.ok) {
-                        const contentLength = result.headers.get('Content-Length');
-                        if (contentLength) totalSize += parseInt(contentLength, 10);
-                    } else {
-                        throw new Error(`Failed to fetch segment HEAD: ${result.status}`);
-                    }
+                    const contentLength = result.headers.get('Content-Length');
+                    if (contentLength) totalSize += parseInt(contentLength, 10);
                 })
             );
 
@@ -76,26 +73,11 @@ export class DashDownloader {
             onProgress?.(new SegmentedDownloadProgress(downloadedBytes, totalSize ?? undefined, i, totalSegments));
 
             const url = getProxyUrl(urls[i]);
-            const segmentResponse = await fetch(url, { signal });
+            const segmentResponse = await fetchWithProxyRetry(url, { signal });
 
-            if (!segmentResponse.ok) {
-                console.warn(`Failed to fetch segment ${i}, retrying...`);
-                await new Promise((r) => setTimeout(r, 1000));
-
-                const retryResponse = await fetch(url, { signal });
-
-                if (!retryResponse.ok) {
-                    throw new Error(`Failed to fetch segment ${i}: ${retryResponse.status}`);
-                }
-
-                const chunk = await retryResponse.arrayBuffer();
-                chunks.push(chunk);
-                downloadedBytes += chunk.byteLength;
-            } else {
-                const chunk = await segmentResponse.arrayBuffer();
-                chunks.push(chunk);
-                downloadedBytes += chunk.byteLength;
-            }
+            const chunk = await segmentResponse.arrayBuffer();
+            chunks.push(chunk);
+            downloadedBytes += chunk.byteLength;
 
             onProgress?.(new SegmentedDownloadProgress(downloadedBytes, totalSize ?? undefined, i + 1, totalSegments));
         }
