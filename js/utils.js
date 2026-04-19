@@ -2,6 +2,7 @@
 import { modernSettings } from './ModernSettings.js';
 import { SVG_ATMOS } from './icons.js';
 import { qualityBadgeSettings, coverArtSizeSettings, trackDateSettings } from './storage.js';
+import { getProxyUrl, fetchWithProxyRetry } from './proxy-utils.js';
 
 export const QUALITY = 'LOSSLESS';
 
@@ -516,17 +517,6 @@ export async function getCoverBlob(api, coverId) {
         fetchSize = bestSize;
     }
 
-    const fetchWithProxy = async (url) => {
-        try {
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-            const response = await fetch(proxyUrl);
-            if (response.ok) return await response.blob();
-        } catch (e) {
-            console.warn('Proxy fetch failed:', e);
-        }
-        return null;
-    };
-
     let blob = null;
     try {
         const url = api.getCoverUrl(coverId, fetchSize.toString());
@@ -536,12 +526,18 @@ export async function getCoverBlob(api, coverId) {
             blob = await response.blob();
         } else {
             // If direct fetch fails (e.g. 404 from SW due to CORS), try proxy
-            blob = await fetchWithProxy(url);
+            const proxyResponse = await fetchWithProxyRetry(getProxyUrl(url));
+            blob = await proxyResponse.blob();
         }
     } catch {
         // Network error (CORS rejection not handled by SW), try proxy
-        const url = api.getCoverUrl(coverId, fetchSize.toString());
-        blob = await fetchWithProxy(url);
+        try {
+            const url = api.getCoverUrl(coverId, fetchSize.toString());
+            const proxyResponse = await fetchWithProxyRetry(getProxyUrl(url));
+            blob = await proxyResponse.blob();
+        } catch (e) {
+            console.warn('Proxy fetch failed:', e);
+        }
     }
 
     if (blob) {

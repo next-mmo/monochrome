@@ -1813,23 +1813,10 @@ export class LosslessAPI {
                     /* ignore HEAD failure; proceed with GET */
                 }
 
-                let response;
-                try {
-                    response = await fetchWithProxyRetry(getProxyUrl(streamUrl), {
-                        cache: 'no-store',
-                        signal: options.signal,
-                    });
-                } catch (proxyError) {
-                    // Proxy exhausted retries — try direct fetch as fallback
-                    console.warn('Proxy failed after retries, trying direct fetch:', proxyError.message);
-                    response = await fetch(streamUrl, {
-                        cache: 'no-store',
-                        signal: options.signal,
-                    });
-                    if (!response.ok) {
-                        throw new Error(`Direct fetch also failed: ${response.status}`);
-                    }
-                }
+                const response = await fetchWithProxyRetry(getProxyUrl(streamUrl), {
+                    cache: 'no-store',
+                    signal: options.signal,
+                });
 
                 const contentLengthHeader = response.headers.get('Content-Length');
                 const totalBytes = resolveDownloadTotalBytes(contentLengthHeader, headContentLength);

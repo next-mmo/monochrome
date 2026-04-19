@@ -10,6 +10,7 @@ import {
     SVG_GLOBE,
 } from './icons.js';
 import { sidePanelManager } from './side-panel.js';
+import { getProxyUrl, fetchWithProxyRetry } from './proxy-utils.js';
 
 const loadAmLyrics = () => {
     const images = Array.from(document.images).filter((img) => !img.complete);
@@ -89,7 +90,7 @@ class GeniusManager {
         const token = this.getToken();
 
         const url = `https://api.genius.com/search?q=${query}&access_token=${token}`;
-        const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+        const response = await fetchWithProxyRetry(getProxyUrl(url));
 
         if (!response.ok) throw new Error('Failed to search Genius');
 
@@ -110,7 +111,7 @@ class GeniusManager {
     async getReferents(songId) {
         const token = this.getToken();
         const url = `https://api.genius.com/referents?song_id=${songId}&text_format=plain&per_page=50&access_token=${token}`;
-        const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+        const response = await fetchWithProxyRetry(getProxyUrl(url));
 
         if (!response.ok) throw new Error('Failed to fetch annotations');
 
