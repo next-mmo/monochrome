@@ -10,7 +10,28 @@ import {
     SVG_GLOBE,
 } from './icons.js';
 import { sidePanelManager } from './side-panel.js';
-import('@uimaxbai/am-lyrics/am-lyrics.js').catch(console.error);
+
+const loadAmLyrics = () => {
+    const images = Array.from(document.images).filter((img) => !img.complete);
+    if (images.length === 0) {
+        import('@uimaxbai/am-lyrics/am-lyrics.js').catch(console.error);
+    } else {
+        Promise.all(
+            images.map(
+                (img) =>
+                    new Promise((res) => {
+                        img.onload = img.onerror = res;
+                    })
+            )
+        ).then(() => import('@uimaxbai/am-lyrics/am-lyrics.js').catch(console.error));
+    }
+};
+
+if (document.readyState === 'complete') {
+    loadAmLyrics();
+} else {
+    window.addEventListener('load', loadAmLyrics);
+}
 
 // Check if text contains Japanese, Chinese, or Korean characters
 function containsAsianText(text) {
@@ -53,8 +74,13 @@ class GeniusManager {
         this.loading = false;
     }
 
+    // idgaf anymore im js hardcoding this lmaooo
     getToken() {
-        return 'QmS9OvsS-7ifRBKx_ochIPQU7oejIS9Eo_z5iWHmCPyhwLVQID3pYTHJmJTa6z8z'; // idgaf anymore im js hardcoding this lmaooo
+        const hostname = window.location.hostname;
+        if (hostname.endsWith('monochrome.tf') || hostname === 'monochrome.tf') {
+            return 'OpITG-h86oehKYuJJ5QVY5F-HxUWXb31EwGKarx2Tle3W9rBUVnMaUL9qo_Oh9Q7';
+        }
+        return 'QmS9OvsS-7ifRBKx_ochIPQU7oejIS9Eo_z5iWHmCPyhwLVQID3pYTHJmJTa6z8z';
     }
 
     async searchTrack(title, artist) {
@@ -278,13 +304,13 @@ export class LyricsManager {
 
             // Load Kuroshiro from CDN
             if (!window.Kuroshiro) {
-                await this.loadScript('https://unpkg.com/kuroshiro@1.2.0/dist/kuroshiro.min.js');
+                await this.loadScript('https://cdn.jsdelivr.net/npm/kuroshiro@1.2.0/dist/kuroshiro.min.js');
             }
 
             // Load Kuromoji analyzer from CDN
             if (!window.KuromojiAnalyzer) {
                 await this.loadScript(
-                    'https://unpkg.com/kuroshiro-analyzer-kuromoji@1.1.0/dist/kuroshiro-analyzer-kuromoji.min.js'
+                    'https://cdn.jsdelivr.net/npm/kuroshiro-analyzer-kuromoji@1.1.0/dist/kuroshiro-analyzer-kuromoji.min.js'
                 );
             }
 
@@ -964,6 +990,82 @@ themeObserver.observe(document.documentElement, {
     attributeFilter: ['data-theme', 'style'],
 });
 
+function applyFullscreenLyricsShadowTweaks(amLyrics, container) {
+    if (!amLyrics || container?.id !== 'fullscreen-lyrics-content') return;
+
+    const injectStyle = () => {
+        const root = amLyrics.shadowRoot;
+        if (!root) return false;
+
+        let styleEl = root.getElementById('monochrome-fullscreen-lyrics-tweaks');
+        if (!styleEl) {
+            styleEl = document.createElement('style');
+            styleEl.id = 'monochrome-fullscreen-lyrics-tweaks';
+            root.appendChild(styleEl);
+        }
+
+        styleEl.textContent = `
+            .lyrics-container {
+                scrollbar-width: none !important;
+                -ms-overflow-style: none !important;
+            }
+
+            .lyrics-container::-webkit-scrollbar {
+                width: 0 !important;
+                height: 0 !important;
+                display: none !important;
+                background: transparent !important;
+            }
+
+            .lyrics-line {
+                transform-origin: left center;
+                transition:
+                    opacity 0.42s ease,
+                    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1) var(--lyrics-line-delay, 0ms),
+                    filter 0.48s cubic-bezier(0.22, 1, 0.36, 1) !important;
+            }
+
+            .lyrics-line:not(.active):not(.pre-active) {
+                opacity: 0.44;
+            }
+            .lyrics-line-container {
+                transition:
+                    transform 0.72s cubic-bezier(0.22, 1, 0.36, 1),
+                    background-color 0.3s ease,
+                    color 0.3s ease !important;
+            }
+
+            .lyrics-line.active .lyrics-line-container,
+            .lyrics-line.pre-active .lyrics-line-container {
+                transition:
+                    transform 0.56s cubic-bezier(0.22, 1, 0.36, 1),
+                    background-color 0.22s ease,
+                    color 0.22s ease !important;
+            }
+
+            .lyrics-line.active .lyrics-line-container {
+                transform: scale(1.015);
+            }
+        `;
+
+        return true;
+    };
+
+    if (injectStyle()) return;
+
+    let attempts = 0;
+    const maxAttempts = 24;
+    const tryInject = () => {
+        if (injectStyle()) return;
+        attempts += 1;
+        if (attempts < maxAttempts) {
+            requestAnimationFrame(tryInject);
+        }
+    };
+
+    requestAnimationFrame(tryInject);
+}
+
 async function renderLyricsComponent(container, track, audioPlayer, lyricsManager) {
     container.innerHTML = '<div class="lyrics-loading">Loading lyrics...</div>';
 
@@ -978,7 +1080,7 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
         const artist = getTrackArtists(track);
         const album = track.album?.title;
         const durationMs = track.duration ? Math.round(track.duration * 1000) : undefined;
-        const isrc = track.isrc || '';
+        const isrc = (track.isrc || track.mediaMetadata?.isrc || track.audioQuality?.isrc || '').trim();
 
         const isTracker = track.isTracker || (track.id && String(track.id).startsWith('tracker-'));
         let queryTitle = title;
@@ -999,13 +1101,14 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
         if (isrc) amLyrics.setAttribute('isrc', isrc);
 
         amLyrics.setAttribute('highlight-color', getLyricsHighlightColor());
-        amLyrics.setAttribute('hover-background-color', 'rgba(59, 130, 246, 0.14)');
+        amLyrics.setAttribute('hover-background-color', 'color-mix(in srgb, var(--primary) 16%, transparent)');
         amLyrics.setAttribute('autoscroll', '');
         amLyrics.setAttribute('interpolate', '');
         amLyrics.style.height = '100%';
         amLyrics.style.width = '100%';
 
         container.appendChild(amLyrics);
+        applyFullscreenLyricsShadowTweaks(amLyrics, container);
 
         lyricsManager.setupLyricsObserver(amLyrics);
 

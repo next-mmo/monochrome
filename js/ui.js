@@ -13,9 +13,11 @@ import {
     calculateTotalDuration,
     formatDuration,
     escapeHtml,
+    decodeHtml,
     getShareUrl,
+    createModal,
 } from './utils.js';
-import { openLyricsPanel } from './lyrics.js';
+import { openLyricsPanel, renderLyricsInFullscreen, clearFullscreenLyricsSync } from './lyrics.js';
 import {
     recentActivityManager,
     backgroundSettings,
@@ -27,9 +29,7 @@ import {
     contentBlockingSettings,
     settingsUiState,
     fullscreenCoverNoRoundSettings,
-    fullscreenCoverVanillaTiltSettings,
-    fullscreenCoverTiltDistanceSettings,
-    fullscreenCoverTiltSpeedSettings,
+    artistBannerSettings,
 } from './storage.js';
 import { db } from './db.js';
 import { getVibrantColorFromImage } from './vibrant-color.js';
@@ -37,6 +37,7 @@ import { syncManager } from './accounts/pocketbase.js';
 import { authManager } from './accounts/auth.js';
 import { partyManager } from './listening-party.js';
 import { Visualizer } from './visualizer.js';
+import { audioContextManager } from './audio-context.js';
 import { navigate } from './router.js';
 import { sidePanelManager } from './side-panel.js';
 import {
@@ -49,7 +50,13 @@ import {
     createProjectCardHTML,
     createTrackFromSong,
 } from './tracker.js';
-import { trackSearch, trackChangeSort } from './analytics.js';
+
+let _isBlockedCopyright = (_c) => false;
+import('./content-filter.ts')
+    .then((m) => {
+        _isBlockedCopyright = m.isBlockedCopyright;
+    })
+    .catch(() => {});
 
 fontSettings.applyFont().catch(console.error);
 fontSettings.applyFontSize();
@@ -61,6 +68,8 @@ import {
     SVG_HEART,
     SVG_VOLUME,
     SVG_MUTE,
+    SVG_EYE,
+    SVG_EYE_OFF,
     SVG_HEART_FILLED,
     SVG_CLOSE,
     SVG_SORT,
@@ -89,6 +98,12 @@ import {
     SVG_CHECKBOX,
 } from './icons.js';
 
+const setFullscreenUIToggleIcon = (button, visualizerOnlyMode) => {
+    if (!button) return;
+    button.innerHTML = visualizerOnlyMode ? SVG_EYE(24) : SVG_EYE_OFF(24);
+};
+
+const isMobileFullscreenViewport = () => window.matchMedia('(max-width: 768px)').matches;
 function sortTracks(tracks, sortType) {
     if (sortType === 'custom') return [...tracks];
     const sorted = [...tracks];
@@ -151,6 +166,10 @@ export class UIRenderer {
         this.renderLock = false;
         this.lastRecommendedTracks = [];
         this.currentArtistId = null;
+        this.fullscreenLyricsVisible = true;
+        this.fullscreenPlaybackStateCleanup = null;
+        this.fullscreenDismissHandleCleanup = null;
+        this.fullscreenLyricsToggleCleanup = null;
 
         // Listen for dynamic color reset events
         window.addEventListener('reset-dynamic-color', () => {
@@ -177,20 +196,8 @@ export class UIRenderer {
                 } else {
                     overlay.classList.remove('fullscreen-cover-no-round');
                 }
-                if (coverImage) {
-                    if (fullscreenCoverVanillaTiltSettings.isEnabled() && window.VanillaTilt) {
-                        if (coverImage.vanillaTilt) {
-                            coverImage.vanillaTilt.destroy();
-                        }
-                        window.VanillaTilt.init(coverImage, {
-                            max: fullscreenCoverTiltDistanceSettings.getValue(),
-                            speed: fullscreenCoverTiltSpeedSettings.getValue(),
-                            glare: true,
-                            'max-glare': 0.3,
-                        });
-                    } else if (coverImage.vanillaTilt) {
-                        coverImage.vanillaTilt.destroy();
-                    }
+                if (coverImage?.vanillaTilt) {
+                    coverImage.vanillaTilt.destroy();
                 }
             }
         });
@@ -328,8 +335,6 @@ export class UIRenderer {
         const lyricsBtn = document.getElementById('toggle-lyrics-btn');
         const fsLikeBtn = document.getElementById('fs-like-btn');
         const fsAddPlaylistBtn = document.getElementById('fs-add-playlist-btn');
-        const saveOfflineBtn = document.getElementById('save-offline-btn');
-        const mobileSaveOfflineBtn = document.getElementById('mobile-save-offline-btn');
 
         if (track) {
             const isLocal = track.isLocal;
@@ -378,28 +383,6 @@ export class UIRenderer {
                 if (shouldHideLikes) fsAddPlaylistBtn.style.display = 'none';
                 else fsAddPlaylistBtn.style.display = 'flex';
             }
-
-            // Update save-offline button
-            if (saveOfflineBtn || mobileSaveOfflineBtn) {
-                const offlineBtns = [saveOfflineBtn, mobileSaveOfflineBtn].filter(Boolean);
-                if (isLocal || isTracker) {
-                    offlineBtns.forEach(btn => { btn.style.display = 'none'; });
-                } else {
-                    offlineBtns.forEach(btn => { btn.style.display = 'flex'; });
-                    import('./offline.js').then(({ isTrackOffline }) => {
-                        isTrackOffline(track.id).then((isOffline) => {
-                            offlineBtns.forEach(btn => {
-                                btn.title = isOffline ? 'Remove from Offline' : 'Save Offline';
-                                btn.classList.toggle('active', isOffline);
-                                const svg = btn.querySelector('svg');
-                                if (svg) {
-                                    svg.setAttribute('fill', isOffline ? 'currentColor' : 'none');
-                                }
-                            });
-                        });
-                    });
-                }
-            }
         } else {
             if (likeBtn) likeBtn.style.display = 'none';
             if (addPlaylistBtn) addPlaylistBtn.style.setProperty('display', 'none', 'important');
@@ -407,8 +390,6 @@ export class UIRenderer {
             if (lyricsBtn) lyricsBtn.style.display = 'none';
             if (fsLikeBtn) fsLikeBtn.style.display = 'none';
             if (fsAddPlaylistBtn) fsAddPlaylistBtn.style.display = 'none';
-            if (saveOfflineBtn) saveOfflineBtn.style.display = 'none';
-            if (mobileSaveOfflineBtn) mobileSaveOfflineBtn.style.display = 'none';
         }
     }
 
@@ -536,13 +517,14 @@ export class UIRenderer {
             isUnavailable ? 'unavailable' : '',
             isBlocked ? 'blocked' : '',
             showRowLike ? 'track-item--inline-like' : '',
+            this.currentPage === 'search' ? 'no-duration' : '',
         ]
             .filter(Boolean)
             .join(' ');
 
         return `
-            <div class="${classList}" 
-                 data-track-id="${track.id}" 
+            <div class="${classList}"
+                 data-track-id="${track.id}"
                  ${isVideo ? 'data-type="video"' : 'data-type="track"'}
                  ${track.isLocal ? 'data-is-local="true"' : ''}
                  ${isUnavailable ? 'title="This track is currently unavailable"' : ''}
@@ -569,11 +551,44 @@ export class UIRenderer {
         `;
     }
 
-    getCoverHTML(cover, alt, className = 'card-image', loading = 'lazy', videoCoverUrl = null) {
-        const imageUrl = this.api.getCoverUrl(cover);
+    getCoverHTML(
+        cover,
+        alt,
+        className = 'card-image',
+        loading = 'lazy',
+        videoCoverUrl = null,
+        isEditorsPick = false,
+        type = 'album'
+    ) {
+        let size = '320';
+        if (className === 'track-item-cover') {
+            size = '80';
+        } else if (type === 'artist') {
+            size = '160';
+        }
+
+        const imageUrl =
+            type === 'artist' ? this.api.getArtistPictureUrl(cover, size) : this.api.getCoverUrl(cover, size);
+
         if (videoCoverUrl) {
             return `<video src="${videoCoverUrl}" poster="${imageUrl}" class="${className}" alt="${alt}" preload="metadata" playsinline muted></video>`;
         }
+
+        if (
+            isEditorsPick &&
+            cover &&
+            typeof cover === 'string' &&
+            !cover.startsWith('http') &&
+            !cover.startsWith('blob:') &&
+            !cover.startsWith('assets/')
+        ) {
+            const formattedId = String(cover).replace(/-/g, '/');
+            const tidalUrl = `https://resources.tidal.com/images/${formattedId}/320x320.jpg`;
+            const wsrvUrl = `https://wsrv.nl/?url=${encodeURIComponent(tidalUrl)}&w=250&h=250&output=webp`;
+            const fetchPriorityAttr = loading === 'eager' ? ' fetchpriority="high"' : '';
+            return `<img src="${wsrvUrl}" class="${className}" alt="${alt}" loading="${loading}"${fetchPriorityAttr}>`;
+        }
+
         return `<img src="${imageUrl}" class="${className}" alt="${alt}" loading="${loading}">`;
     }
 
@@ -603,7 +618,7 @@ export class UIRenderer {
 
         const cardContent = `
             <div class="card-info">
-                <h4 class="card-title">${title}</h4>
+                <h3 class="card-title">${title}</h3>
                 ${subtitle ? `<p class="card-subtitle">${subtitle}</p>` : ''}
             </div>`;
 
@@ -684,7 +699,15 @@ export class UIRenderer {
     createUserPlaylistCardHTML(playlist, customSubtitle = null) {
         let imageHTML = '';
         if (playlist.cover) {
-            imageHTML = `<img src="${playlist.cover}" alt="${playlist.name}" class="card-image" loading="lazy">`;
+            imageHTML = this.getCoverHTML(
+                playlist.cover,
+                escapeHtml(playlist.name),
+                'card-image',
+                playlist._lazy === false ? 'eager' : 'lazy',
+                null,
+                playlist._isEditorsPick || false,
+                'album'
+            );
         } else {
             const tracks = playlist.tracks || [];
             let uniqueCovers = playlist.images || [];
@@ -775,8 +798,10 @@ export class UIRenderer {
                 album.cover,
                 escapeHtml(album.title),
                 'card-image',
-                'lazy',
-                album.videoCoverUrl
+                album._lazy === false ? 'eager' : 'lazy',
+                album.videoCoverUrl,
+                album._isEditorsPick || false,
+                'album'
             ),
             actionButtonsHTML: `
                 <button class="like-btn card-like-btn" data-action="toggle-like" data-type="album" title="Add to Liked">
@@ -847,7 +872,15 @@ export class UIRenderer {
             href: `/artist/${artist.id}`,
             title: escapeHtml(artist.name),
             subtitle: '',
-            imageHTML: `<img src="${this.api.getArtistPictureUrl(artist.picture)}" alt="${escapeHtml(artist.name)}" class="card-image" loading="lazy">`,
+            imageHTML: this.getCoverHTML(
+                artist.picture,
+                escapeHtml(artist.name),
+                'card-image',
+                artist._lazy === false ? 'eager' : 'lazy',
+                null,
+                artist._isEditorsPick || false,
+                'artist'
+            ),
             actionButtonsHTML: `
                 <button class="like-btn card-like-btn" data-action="toggle-like" data-type="artist" title="Add to Liked">
                     ${this.createHeartIcon(false)}
@@ -860,8 +893,9 @@ export class UIRenderer {
     }
 
     createSkeletonTrack(showCover = false) {
+        const noDurationClass = this.currentPage === 'search' ? ' no-duration' : '';
         return `
-            <div class="skeleton-track">
+            <div class="skeleton-track${noDurationClass}">
                 ${showCover ? '<div class="skeleton skeleton-track-cover"></div>' : '<div class="skeleton skeleton-track-number"></div>'}
                 <div class="skeleton-track-info">
                     <div class="skeleton-track-details">
@@ -922,14 +956,10 @@ export class UIRenderer {
             inputElement.focus();
         };
 
-        const oldToggleListener = inputElement._searchClearToggleListener;
-        if (oldToggleListener) inputElement.removeEventListener('input', oldToggleListener);
-
         inputElement._searchClearToggleListener = toggleVisibility;
         inputElement.addEventListener('input', toggleVisibility);
         clearBtn._clearListener = clearListener;
         clearBtn.addEventListener('click', clearListener);
-        toggleVisibility();
     }
 
     setupTracklistSearch(
@@ -1082,9 +1112,13 @@ export class UIRenderer {
         let r = parseInt(hex.substr(0, 2), 16);
         let g = parseInt(hex.substr(2, 2), 16);
         let b = parseInt(hex.substr(4, 2), 16);
+        let fullscreenR = r;
+        let fullscreenG = g;
+        let fullscreenB = b;
 
         // Calculate perceived brightness
         let brightness = (r * 299 + g * 587 + b * 114) / 1000;
+        let fullscreenBrightness = brightness;
 
         if (isLightMode) {
             // In light mode, the background is white.
@@ -1111,6 +1145,23 @@ export class UIRenderer {
         }
 
         const adjustedColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+        while (fullscreenBrightness < 105) {
+            fullscreenR = Math.min(255, Math.max(fullscreenR + 1, Math.floor(fullscreenR * 1.08)));
+            fullscreenG = Math.min(255, Math.max(fullscreenG + 1, Math.floor(fullscreenG * 1.08)));
+            fullscreenB = Math.min(255, Math.max(fullscreenB + 1, Math.floor(fullscreenB * 1.08)));
+            fullscreenBrightness = (fullscreenR * 299 + fullscreenG * 587 + fullscreenB * 114) / 1000;
+            if (fullscreenR >= 255 && fullscreenG >= 255 && fullscreenB >= 255) break;
+        }
+        while (fullscreenBrightness > 185) {
+            fullscreenR = Math.floor(fullscreenR * 0.92);
+            fullscreenG = Math.floor(fullscreenG * 0.92);
+            fullscreenB = Math.floor(fullscreenB * 0.92);
+            fullscreenBrightness = (fullscreenR * 299 + fullscreenG * 587 + fullscreenB * 114) / 1000;
+        }
+
+        const fullscreenAdjustedColor = `#${fullscreenR.toString(16).padStart(2, '0')}${fullscreenG
+            .toString(16)
+            .padStart(2, '0')}${fullscreenB.toString(16).padStart(2, '0')}`;
 
         // Calculate contrast text color for buttons (text on top of the vibrant color)
         const foreground = brightness > 128 ? '#000000' : '#ffffff';
@@ -1122,6 +1173,8 @@ export class UIRenderer {
         root.style.setProperty('--highlight-rgb', `${r}, ${g}, ${b}`);
         root.style.setProperty('--active-highlight', adjustedColor);
         root.style.setProperty('--ring', adjustedColor);
+        root.style.setProperty('--fs-accent', fullscreenAdjustedColor);
+        root.style.setProperty('--fs-accent-rgb', `${fullscreenR}, ${fullscreenG}, ${fullscreenB}`);
 
         // Calculate a safe hover color
         let hoverColor;
@@ -1144,7 +1197,26 @@ export class UIRenderer {
         root.style.removeProperty('--highlight-rgb');
         root.style.removeProperty('--active-highlight');
         root.style.removeProperty('--ring');
+        root.style.removeProperty('--fs-accent');
+        root.style.removeProperty('--fs-accent-rgb');
         root.style.removeProperty('--track-hover-bg');
+    }
+
+    getFullscreenQualityBadgeHTML(track) {
+        const nowPlayingTitle = document.querySelector('.now-playing-bar .title');
+        if (nowPlayingTitle && this.player?.currentTrack?.id === track?.id) {
+            const badges = Array.from(nowPlayingTitle.querySelectorAll('.shaka-quality-badge, .quality-badge'));
+            const liveBadge = badges.find((badge) => getComputedStyle(badge).display !== 'none') || badges[0];
+            if (liveBadge) {
+                const badgeClone = liveBadge.cloneNode(true);
+                if (badgeClone instanceof HTMLElement) {
+                    badgeClone.style.removeProperty('display');
+                }
+                return badgeClone.outerHTML;
+            }
+        }
+
+        return createQualityBadgeHTML(track);
     }
 
     async updateFullscreenMetadata(track, nextTrack) {
@@ -1216,18 +1288,35 @@ export class UIRenderer {
             const currentImage = document.getElementById('fullscreen-cover-image');
 
             if (videoCoverUrl) {
+                const isPaused = this.player?.activeElement?.paused ?? true;
                 if (currentImage.tagName === 'IMG') {
                     const video = document.createElement('video');
                     video.src = videoCoverUrl;
-                    video.autoplay = true;
+                    video.autoplay = !isPaused;
                     video.loop = true;
                     video.muted = true;
                     video.playsInline = true;
                     video.preload = 'auto';
                     video.className = currentImage.className;
+                    video.id = currentImage.id;
+                    video.style.objectFit = 'cover';
                     currentImage.replaceWith(video);
+                    if (!isPaused) {
+                        video.play().catch(() => {});
+                    }
                 } else if (currentImage.src !== videoCoverUrl) {
                     currentImage.src = videoCoverUrl;
+                    if (!isPaused) {
+                        currentImage.play().catch(() => {});
+                    } else {
+                        currentImage.pause();
+                    }
+                } else {
+                    if (!isPaused) {
+                        currentImage.play().catch(() => {});
+                    } else {
+                        currentImage.pause();
+                    }
                 }
             } else {
                 if (currentImage.tagName === 'VIDEO') {
@@ -1240,12 +1329,10 @@ export class UIRenderer {
                     currentImage.src = coverUrl;
                 }
             }
-            overlay.style.setProperty('--bg-image', `url('${this.api.getCoverUrl(track.album?.cover, '1280')}')`);
             await this.extractAndApplyColor(this.api.getCoverUrl(track.album?.cover, '80'));
         }
 
-        const qualityBadge = createQualityBadgeHTML(track);
-        title.innerHTML = `${escapeHtml(track.title)} ${qualityBadge}`;
+        this.updateFullscreenQualityBadgePlacement(track, overlay);
         artist.textContent = getTrackArtists(track);
 
         if (nextTrack) {
@@ -1258,44 +1345,16 @@ export class UIRenderer {
 
     async showFullscreenCover(track, nextTrack, lyricsManager, activeElement) {
         if (!track) return;
-        if (!window.location.hash.startsWith('#fullscreen')) {
+        this.fullscreenVisualizerSuppressed = false;
+        if (window.location.hash !== '#fullscreen') {
             window.history.pushState({ fullscreen: true }, '', '#fullscreen');
         }
         const overlay = document.getElementById('fullscreen-cover-overlay');
+        const isAlreadyOpen = overlay && window.getComputedStyle(overlay).display !== 'none';
         const nextTrackEl = document.getElementById('fullscreen-next-track');
+        const lyricsPane = document.getElementById('fullscreen-lyrics-pane');
+        const lyricsContent = document.getElementById('fullscreen-lyrics-content');
         const lyricsToggleBtn = document.getElementById('toggle-fullscreen-lyrics-btn');
-
-        // Detect radio mode from hash or offline radio state
-        const isRadioMode = window.location.hash.includes('radio=true') || this._offlineRadioActive;
-        if (isRadioMode) {
-            overlay.classList.add('radio-mode');
-
-            // Inject vinyl overlay for disc grooves + center hole
-            const mainView = overlay.querySelector('.fullscreen-main-view');
-            if (mainView && !mainView.querySelector('.vinyl-overlay')) {
-                const vinylEl = document.createElement('div');
-                vinylEl.className = 'vinyl-overlay';
-                mainView.appendChild(vinylEl);
-            }
-
-            // Track play/pause state for spin animation
-            const el = activeElement || this.player?.activeElement;
-            if (el) {
-                overlay.classList.toggle('radio-paused', el.paused);
-                // Clean up previous listeners
-                if (this._radioPlayHandler) el.removeEventListener('play', this._radioPlayHandler);
-                if (this._radioPauseHandler) el.removeEventListener('pause', this._radioPauseHandler);
-                this._radioPlayHandler = () => overlay.classList.remove('radio-paused');
-                this._radioPauseHandler = () => overlay.classList.add('radio-paused');
-                el.addEventListener('play', this._radioPlayHandler);
-                el.addEventListener('pause', this._radioPauseHandler);
-            }
-        } else {
-            overlay.classList.remove('radio-mode', 'radio-paused');
-            // Remove vinyl overlay if it exists
-            const vinylEl = overlay.querySelector('.vinyl-overlay');
-            if (vinylEl) vinylEl.remove();
-        }
 
         await this.updateFullscreenMetadata(track, nextTrack);
 
@@ -1307,27 +1366,46 @@ export class UIRenderer {
             nextTrackEl.classList.remove('animate-in');
         }
 
-        if (lyricsManager && activeElement) {
-            lyricsToggleBtn.style.display = 'flex';
-            lyricsToggleBtn.classList.remove('active');
-
-            const toggleLyrics = () => {
-                openLyricsPanel(track, activeElement, lyricsManager);
-                lyricsToggleBtn.classList.toggle('active');
-            };
-
-            const newToggleBtn = lyricsToggleBtn.cloneNode(true);
-            lyricsToggleBtn.parentNode.replaceChild(newToggleBtn, lyricsToggleBtn);
-            newToggleBtn.addEventListener('click', toggleLyrics);
+        const canRenderLyrics = Boolean(
+            lyricsManager && activeElement && lyricsPane && lyricsContent && track.type !== 'video'
+        );
+        if (canRenderLyrics) {
+            this.fullscreenLyricsVisible = true;
+            if (lyricsToggleBtn) lyricsToggleBtn.style.removeProperty('display');
+            overlay.classList.remove('lyrics-unavailable');
+            clearFullscreenLyricsSync(lyricsContent);
+            await renderLyricsInFullscreen(track, activeElement, lyricsManager, lyricsContent);
         } else {
-            lyricsToggleBtn.style.display = 'none';
+            this.fullscreenLyricsVisible = false;
+            if (lyricsToggleBtn) lyricsToggleBtn.style.display = 'none';
+            overlay.classList.add('lyrics-unavailable');
+            if (lyricsContent) {
+                clearFullscreenLyricsSync(lyricsContent);
+                lyricsContent.innerHTML =
+                    '<div class="fullscreen-lyrics-empty">Lyrics are not available for this track.</div>';
+            }
         }
+        this.updateFullscreenLyricsVisibility(overlay);
 
         const playerBar = document.querySelector('.now-playing-bar');
         if (playerBar) playerBar.style.display = 'none';
+        if (sidePanelManager.isActive('lyrics') || sidePanelManager.isActive('queue')) {
+            sidePanelManager.close();
+        }
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent instanceof HTMLElement && !isAlreadyOpen) {
+            const computedStyles = window.getComputedStyle(mainContent);
+            this.fullscreenMainContentOverflow = {
+                overflow: mainContent.style.overflow,
+                overflowX: mainContent.style.overflowX,
+                overflowY: mainContent.style.overflowY,
+                computedOverflowX: computedStyles.overflowX,
+                computedOverflowY: computedStyles.overflowY,
+            };
+            mainContent.style.overflow = 'hidden';
+        }
 
         this.setupFullscreenControls();
-
         overlay.style.display = 'flex';
 
         if (fullscreenCoverNoRoundSettings.isEnabled()) {
@@ -1337,110 +1415,158 @@ export class UIRenderer {
         }
 
         const coverImage = document.getElementById('fullscreen-cover-image');
-        if (fullscreenCoverVanillaTiltSettings.isEnabled() && coverImage && window.VanillaTilt) {
-            window.VanillaTilt.init(coverImage, {
-                max: fullscreenCoverTiltDistanceSettings.getValue(),
-                speed: fullscreenCoverTiltSpeedSettings.getValue(),
-                glare: true,
-                'max-glare': 0.3,
-            });
+        if (coverImage?.vanillaTilt) {
+            coverImage.vanillaTilt.destroy();
         }
-
-        const startVisualizer = async () => {
-            if (!visualizerSettings.isEnabled()) {
-                if (this.visualizer) this.visualizer.stop();
-                return;
-            }
-
-            if (!this.visualizer && activeElement) {
-                const canvas = document.getElementById('visualizer-canvas');
-                if (canvas) {
-                    this.visualizer = new Visualizer(canvas, activeElement);
-                    await this.visualizer.initPresets();
-                }
-            }
-            if (this.visualizer) {
-                await this.visualizer.start();
-            }
-
-            // Add visualizer-active class for enhanced drop shadow
-            overlay.classList.add('visualizer-active');
-        };
 
         // Setup UI toggle button
         this.setupUIToggleButton(overlay);
+        this.setupControlsAutoHide(overlay);
+        this.setupFullscreenSidePanelSync(overlay);
+        this.setupFullscreenDismissHandle(overlay);
+        this.setupFullscreenLyricsToggle(overlay);
+        await this.refreshFullscreenVisualizerState(activeElement);
+    }
 
-        if (localStorage.getItem('epilepsy-warning-dismissed') === 'true') {
-            await startVisualizer();
-        } else {
-            const modal = document.getElementById('epilepsy-warning-modal');
-            if (modal) {
-                modal.classList.add('active');
+    updateFullscreenLyricsVisibility(overlay = document.getElementById('fullscreen-cover-overlay')) {
+        if (!overlay) return;
 
-                const acceptBtn = document.getElementById('epilepsy-accept-btn');
-                const cancelBtn = document.getElementById('epilepsy-cancel-btn');
+        const lyricsToggleButtons = [
+            document.getElementById('toggle-fullscreen-lyrics-btn'),
+            document.getElementById('toggle-fullscreen-lyrics-mobile-btn'),
+        ].filter(Boolean);
+        const lyricsUnavailable = overlay.classList.contains('lyrics-unavailable');
+        const shouldShowLyrics = this.fullscreenLyricsVisible && !lyricsUnavailable;
 
-                acceptBtn.onclick = async () => {
-                    modal.classList.remove('active');
-                    localStorage.setItem('epilepsy-warning-dismissed', 'true');
-                    await startVisualizer();
-                };
-                cancelBtn.onclick = () => {
-                    modal.classList.remove('active');
-                    this.closeFullscreenCover();
-                };
+        overlay.classList.toggle('lyrics-hidden', !shouldShowLyrics);
+        this.updateFullscreenQualityBadgePlacement(this.player?.currentTrack, overlay);
+
+        lyricsToggleButtons.forEach((lyricsToggleBtn) => {
+            lyricsToggleBtn.classList.toggle('active', shouldShowLyrics);
+            lyricsToggleBtn.title = shouldShowLyrics ? 'Hide Lyrics' : 'Show Lyrics';
+            lyricsToggleBtn.setAttribute('aria-pressed', shouldShowLyrics ? 'true' : 'false');
+            if (lyricsUnavailable) {
+                lyricsToggleBtn.style.display = 'none';
             } else {
-                await startVisualizer();
+                lyricsToggleBtn.style.removeProperty('display');
             }
+        });
+    }
+
+    toggleFullscreenLyrics(overlay = document.getElementById('fullscreen-cover-overlay')) {
+        if (!overlay || overlay.classList.contains('lyrics-unavailable')) return false;
+
+        this.fullscreenLyricsVisible = !this.fullscreenLyricsVisible;
+        this.updateFullscreenLyricsVisibility(overlay);
+        return true;
+    }
+
+    updateFullscreenQualityBadgePlacement(track, overlay = document.getElementById('fullscreen-cover-overlay')) {
+        if (!track || !overlay) return;
+
+        const title = document.getElementById('fullscreen-track-title');
+        const mobileQuality = document.getElementById('fullscreen-mobile-quality');
+        if (!title) return;
+
+        const qualityBadge = this.getFullscreenQualityBadgeHTML(track);
+        const useMobileBadgeOnly =
+            window.matchMedia('(max-width: 768px)').matches && overlay.classList.contains('lyrics-hidden');
+
+        title.innerHTML = useMobileBadgeOnly ? escapeHtml(track.title) : `${escapeHtml(track.title)} ${qualityBadge}`;
+        if (mobileQuality) {
+            mobileQuality.innerHTML = useMobileBadgeOnly ? qualityBadge : '';
+        }
+    }
+
+    async dismissFullscreenCover({ animate = true } = {}) {
+        const overlay = document.getElementById('fullscreen-cover-overlay');
+        if (!overlay || overlay.style.display === 'none') return;
+
+        if (animate) {
+            await new Promise((resolve) => {
+                const finish = () => {
+                    overlay.removeEventListener('transitionend', handleTransitionEnd);
+                    overlay.classList.remove('fullscreen-dragging', 'fullscreen-dismissing');
+                    overlay.style.removeProperty('--fullscreen-drag-offset');
+                    overlay.style.removeProperty('--fullscreen-drag-progress');
+                    resolve();
+                };
+
+                const handleTransitionEnd = (event) => {
+                    if (event.target !== overlay.querySelector('.fullscreen-cover-content')) return;
+                    finish();
+                };
+
+                overlay.addEventListener('transitionend', handleTransitionEnd);
+                overlay.classList.add('fullscreen-dismissing');
+                window.setTimeout(finish, 280);
+            });
+        }
+
+        this.closeFullscreenCover();
+
+        if (window.location.hash === '#fullscreen') {
+            window.history.back();
         }
     }
 
     closeFullscreenCover() {
         const overlay = document.getElementById('fullscreen-cover-overlay');
         const coverImage = document.getElementById('fullscreen-cover-image');
+        const lyricsContent = document.getElementById('fullscreen-lyrics-content');
         if (coverImage && coverImage.vanillaTilt) {
             coverImage.vanillaTilt.destroy();
         }
+        if (lyricsContent) {
+            clearFullscreenLyricsSync(lyricsContent);
+            lyricsContent.innerHTML = '<div class="fullscreen-lyrics-empty">Lyrics appear here.</div>';
+        }
         overlay.style.display = 'none';
-        overlay.classList.remove('visualizer-active', 'ui-hidden', 'fullscreen-cover-no-round', 'radio-mode', 'radio-paused');
-
-        // Clean up vinyl overlay and radio event listeners
-        const vinylEl = overlay.querySelector('.vinyl-overlay');
-        if (vinylEl) vinylEl.remove();
-        if (this._radioPlayHandler || this._radioPauseHandler) {
-            const el = this.player?.activeElement;
-            if (el) {
-                if (this._radioPlayHandler) el.removeEventListener('play', this._radioPlayHandler);
-                if (this._radioPauseHandler) el.removeEventListener('pause', this._radioPauseHandler);
-            }
-            this._radioPlayHandler = null;
-            this._radioPauseHandler = null;
-        }
-
-        // Turn off offline radio when fullscreen closes
-        if (this._offlineRadioActive) {
-            this._offlineRadioActive = false;
-            if (this.player) {
-                this.player.repeatMode = 0;
-                this.player.shuffleActive = false;
-                // Pause audio when radio stops
-                if (this.player.activeElement) {
-                    this.player.activeElement.pause();
-                }
-            }
-            window.dispatchEvent(new CustomEvent('repeat-mode-changed'));
-            // Update the radio button label if it exists
-            const radioBtn = document.getElementById('offline-radio-btn');
-            if (radioBtn) {
-                radioBtn.classList.remove('offline-radio-active');
-                const label = radioBtn.querySelector('span');
-                const selectedArtist = this._offlineSelectedArtist;
-                if (label) label.textContent = selectedArtist ? `Start Radio — ${selectedArtist} only` : 'Start Radio with all tracks';
-            }
-        }
+        overlay.classList.remove(
+            'visualizer-active',
+            'ui-hidden',
+            'fullscreen-cover-no-round',
+            'fullscreen-paused',
+            'fullscreen-dragging',
+            'fullscreen-dismissing'
+        );
+        overlay.style.removeProperty('--fullscreen-drag-offset');
+        overlay.style.removeProperty('--fullscreen-drag-progress');
 
         const playerBar = document.querySelector('.now-playing-bar');
         if (playerBar) playerBar.style.removeProperty('display');
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent instanceof HTMLElement) {
+            const previousOverflow = this.fullscreenMainContentOverflow;
+            if (previousOverflow && typeof previousOverflow === 'object') {
+                if (previousOverflow.overflow) {
+                    mainContent.style.overflow = previousOverflow.overflow;
+                } else {
+                    mainContent.style.removeProperty('overflow');
+                }
+
+                if (previousOverflow.overflowX) {
+                    mainContent.style.overflowX = previousOverflow.overflowX;
+                } else if (previousOverflow.computedOverflowX && previousOverflow.computedOverflowX !== 'visible') {
+                    mainContent.style.overflowX = previousOverflow.computedOverflowX;
+                } else {
+                    mainContent.style.removeProperty('overflow-x');
+                }
+
+                if (previousOverflow.overflowY) {
+                    mainContent.style.overflowY = previousOverflow.overflowY;
+                } else if (previousOverflow.computedOverflowY && previousOverflow.computedOverflowY !== 'visible') {
+                    mainContent.style.overflowY = previousOverflow.computedOverflowY;
+                } else {
+                    mainContent.style.removeProperty('overflow-y');
+                }
+            } else {
+                mainContent.style.removeProperty('overflow');
+                mainContent.style.removeProperty('overflow-x');
+                mainContent.style.removeProperty('overflow-y');
+            }
+            this.fullscreenMainContentOverflow = null;
+        }
 
         if (this.player?.currentTrack?.type === 'video') {
             const coverContainer = document.querySelector('.now-playing-bar .track-info');
@@ -1472,11 +1598,142 @@ export class UIRenderer {
         if (this.visualizer) {
             this.visualizer.stop();
         }
+        this.fullscreenVisualizerSuppressed = false;
 
         // Clear UI toggle button timers
         if (this.uiToggleMouseTimer) {
             clearTimeout(this.uiToggleMouseTimer);
             this.uiToggleMouseTimer = null;
+        }
+
+        if (this.controlsIdleCleanup) {
+            this.controlsIdleCleanup();
+            this.controlsIdleCleanup = null;
+        }
+
+        if (this.fullscreenSidePanelSyncCleanup) {
+            this.fullscreenSidePanelSyncCleanup();
+            this.fullscreenSidePanelSyncCleanup = null;
+        }
+
+        if (this.fullscreenDismissHandleCleanup) {
+            this.fullscreenDismissHandleCleanup();
+            this.fullscreenDismissHandleCleanup = null;
+        }
+
+        if (this.fullscreenLyricsToggleCleanup) {
+            this.fullscreenLyricsToggleCleanup();
+            this.fullscreenLyricsToggleCleanup = null;
+        }
+    }
+
+    async startFullscreenVisualizer(activeElement, overlay) {
+        if (!activeElement || !overlay) return false;
+
+        if (audioContextManager.isReady()) {
+            audioContextManager.changeSource(activeElement);
+            await audioContextManager.resume();
+        } else {
+            audioContextManager.init(activeElement);
+            if (audioContextManager.isReady()) {
+                await audioContextManager.resume();
+            }
+        }
+
+        if (!this.visualizer) {
+            const canvas = document.getElementById('visualizer-canvas');
+            if (canvas) {
+                this.visualizer = new Visualizer(canvas, activeElement);
+                await this.visualizer.initPresets();
+            }
+        } else {
+            this.visualizer.audio = activeElement;
+        }
+
+        if (this.visualizer) {
+            const started = await this.visualizer.start();
+            overlay.classList.toggle('visualizer-active', started);
+            return started;
+        }
+
+        overlay.classList.remove('visualizer-active');
+        return false;
+    }
+
+    async ensureVisualizerPermission(activeElement, overlay, { closeOnCancel = false } = {}) {
+        if (localStorage.getItem('epilepsy-warning-dismissed') === 'true') {
+            return await this.startFullscreenVisualizer(activeElement, overlay);
+        }
+
+        const modal = document.getElementById('epilepsy-warning-modal');
+        if (!modal) {
+            return await this.startFullscreenVisualizer(activeElement, overlay);
+        }
+
+        return await new Promise((resolve) => {
+            modal.classList.add('active');
+
+            const acceptBtn = document.getElementById('epilepsy-accept-btn');
+            const cancelBtn = document.getElementById('epilepsy-cancel-btn');
+
+            acceptBtn.onclick = async () => {
+                modal.classList.remove('active');
+                localStorage.setItem('epilepsy-warning-dismissed', 'true');
+                resolve(await this.startFullscreenVisualizer(activeElement, overlay));
+            };
+
+            cancelBtn.onclick = () => {
+                modal.classList.remove('active');
+                if (closeOnCancel) {
+                    this.closeFullscreenCover();
+                }
+                resolve(null);
+            };
+        });
+    }
+
+    async refreshFullscreenVisualizerState(activeElement, { closeOnCancel = false } = {}) {
+        const overlay = document.getElementById('fullscreen-cover-overlay');
+        const visualizerBtn = document.getElementById('fs-visualizer-btn');
+        const toggleBtn = document.getElementById('toggle-ui-btn');
+        const isVideoTrack = this.player?.currentTrack?.type === 'video';
+        const enabled = !isVideoTrack && visualizerSettings.isEnabled() && !this.fullscreenVisualizerSuppressed;
+
+        if (!overlay) return;
+
+        if (visualizerBtn) {
+            visualizerBtn.style.display = isVideoTrack ? 'none' : 'flex';
+            visualizerBtn.classList.toggle('active', enabled);
+            visualizerBtn.title = enabled ? 'Disable Visualizer' : 'Use Visualizer';
+        }
+
+        if (!enabled) {
+            overlay.classList.remove('visualizer-active');
+            overlay.classList.remove('ui-hidden');
+            if (this.visualizer) {
+                this.visualizer.stop();
+            }
+            if (toggleBtn) {
+                toggleBtn.classList.remove('active', 'visible');
+                toggleBtn.title = 'Hide UI';
+                setFullscreenUIToggleIcon(toggleBtn, false);
+            }
+            return;
+        }
+
+        const allowed = await this.ensureVisualizerPermission(activeElement, overlay, { closeOnCancel });
+        if (allowed !== true) {
+            if (allowed === null) {
+                this.fullscreenVisualizerSuppressed = true;
+            }
+            overlay.classList.remove('visualizer-active');
+            if (this.visualizer) {
+                this.visualizer.stop();
+            }
+            if (visualizerBtn) {
+                visualizerBtn.classList.remove('active');
+                visualizerBtn.title = 'Use Visualizer';
+            }
         }
     }
 
@@ -1484,9 +1741,16 @@ export class UIRenderer {
         const toggleBtn = document.getElementById('toggle-ui-btn');
         if (!toggleBtn) return;
 
+        const updateToggleButtonIcon = () => {
+            const visualizerOnlyMode =
+                overlay.classList.contains('ui-hidden') && overlay.classList.contains('visualizer-active');
+            setFullscreenUIToggleIcon(toggleBtn, visualizerOnlyMode);
+        };
+
         let isUIHidden = overlay.classList.contains('ui-hidden');
         toggleBtn.classList.toggle('active', isUIHidden);
         toggleBtn.title = isUIHidden ? 'Show UI' : 'Hide UI';
+        updateToggleButtonIcon();
 
         // Show button
         const showButton = () => {
@@ -1505,37 +1769,54 @@ export class UIRenderer {
             showButton();
         }
 
-        const toggleUI = (e) => {
+        const toggleUI = async (e) => {
             if (e) e.stopPropagation();
+            if (!overlay.classList.contains('visualizer-active')) {
+                const isVideoTrack = this.player?.currentTrack?.type === 'video';
+                if (isVideoTrack) {
+                    overlay.classList.remove('ui-hidden');
+                    isUIHidden = false;
+                    toggleBtn.classList.remove('active');
+                    toggleBtn.title = 'Hide UI';
+                    updateToggleButtonIcon();
+                    showButton();
+                    return;
+                }
+
+                this.fullscreenVisualizerSuppressed = false;
+                await this.refreshFullscreenVisualizerState(this.player?.activeElement);
+
+                if (!overlay.classList.contains('visualizer-active')) {
+                    overlay.classList.remove('ui-hidden');
+                    isUIHidden = false;
+                    toggleBtn.classList.remove('active');
+                    toggleBtn.title = 'Hide UI';
+                    updateToggleButtonIcon();
+                    showButton();
+                    return;
+                }
+            }
             isUIHidden = !isUIHidden;
             overlay.classList.toggle('ui-hidden', isUIHidden);
             toggleBtn.classList.toggle('active', isUIHidden);
             toggleBtn.title = isUIHidden ? 'Show UI' : 'Hide UI';
+            updateToggleButtonIcon();
 
             if (isUIHidden) {
-                hideButton();
+                showButton();
             } else {
                 showButton();
             }
         };
 
-        // Mouse move handler
         const handleMouseMove = (e) => {
-            const rect = overlay.getBoundingClientRect();
-            const isNearTopRight = e.clientY < 100 && e.clientX > rect.width - 150;
-
-            if (isUIHidden) {
-                if (overlay.classList.contains('is-video-mode')) {
-                    if (isNearTopRight) {
-                        showButton();
-                    } else {
-                        hideButton();
-                    }
-                } else if (isNearTopRight) {
-                    showButton();
-                } else {
-                    hideButton();
-                }
+            if (!isUIHidden) return;
+            const btnRect = toggleBtn.getBoundingClientRect();
+            const nearBtn = e.clientY < 100 && Math.abs(e.clientX - (btnRect.left + btnRect.width / 2)) < 150;
+            if (nearBtn) {
+                showButton();
+            } else {
+                hideButton();
             }
         };
 
@@ -1555,12 +1836,171 @@ export class UIRenderer {
         };
     }
 
+    setupControlsAutoHide(overlay) {
+        if (this.controlsIdleCleanup) this.controlsIdleCleanup();
+        overlay.classList.remove('controls-idle');
+
+        this.controlsIdleCleanup = () => {
+            overlay.classList.remove('controls-idle');
+        };
+    }
+
+    setupFullscreenSidePanelSync(overlay) {
+        if (this.fullscreenSidePanelSyncCleanup) {
+            this.fullscreenSidePanelSyncCleanup();
+        }
+
+        const syncState = () => {
+            overlay.classList.toggle('queue-panel-active', sidePanelManager.isActive('queue'));
+        };
+
+        const handleChange = () => syncState();
+        window.addEventListener('side-panel-changed', handleChange);
+        syncState();
+
+        this.fullscreenSidePanelSyncCleanup = () => {
+            window.removeEventListener('side-panel-changed', handleChange);
+            overlay.classList.remove('queue-panel-active');
+        };
+    }
+
+    setupFullscreenDismissHandle(overlay) {
+        if (this.fullscreenDismissHandleCleanup) {
+            this.fullscreenDismissHandleCleanup();
+            this.fullscreenDismissHandleCleanup = null;
+        }
+
+        const handle = document.getElementById('fullscreen-dismiss-handle');
+        if (!handle) return;
+
+        let activePointerId = null;
+        let startY = 0;
+        let startX = 0;
+        let lastY = 0;
+        let lastTimestamp = 0;
+        let velocityY = 0;
+        let hasDragged = false;
+
+        const resetDragState = () => {
+            activePointerId = null;
+            hasDragged = false;
+            overlay.classList.remove('fullscreen-dragging');
+            overlay.style.removeProperty('--fullscreen-drag-offset');
+            overlay.style.removeProperty('--fullscreen-drag-progress');
+        };
+
+        const onPointerDown = (event) => {
+            if (!isMobileFullscreenViewport()) return;
+
+            activePointerId = event.pointerId;
+            startY = event.clientY;
+            startX = event.clientX;
+            lastY = event.clientY;
+            lastTimestamp = event.timeStamp;
+            velocityY = 0;
+            hasDragged = false;
+            overlay.classList.add('fullscreen-dragging');
+            handle.setPointerCapture(event.pointerId);
+        };
+
+        const onPointerMove = (event) => {
+            if (event.pointerId !== activePointerId) return;
+
+            const deltaY = Math.max(0, event.clientY - startY);
+            const deltaX = Math.abs(event.clientX - startX);
+
+            if (!hasDragged && deltaX > deltaY) {
+                resetDragState();
+                return;
+            }
+
+            hasDragged = true;
+            event.preventDefault();
+
+            const elapsed = Math.max(1, event.timeStamp - lastTimestamp);
+            velocityY = (event.clientY - lastY) / elapsed;
+            lastY = event.clientY;
+            lastTimestamp = event.timeStamp;
+
+            const progress = Math.min(deltaY / Math.max(window.innerHeight * 0.32, 1), 1);
+            overlay.style.setProperty('--fullscreen-drag-offset', `${deltaY}px`);
+            overlay.style.setProperty('--fullscreen-drag-progress', progress.toFixed(3));
+        };
+
+        const onPointerEnd = async (event) => {
+            if (event.pointerId !== activePointerId) return;
+
+            const deltaY = Math.max(0, event.clientY - startY);
+            const shouldDismiss = hasDragged && (deltaY > 96 || velocityY > 0.55);
+
+            if (handle.hasPointerCapture(event.pointerId)) {
+                handle.releasePointerCapture(event.pointerId);
+            }
+
+            if (shouldDismiss) {
+                await this.dismissFullscreenCover();
+                return;
+            }
+
+            resetDragState();
+        };
+
+        const onClick = async (event) => {
+            if (!isMobileFullscreenViewport() || hasDragged) return;
+            event.preventDefault();
+            await this.dismissFullscreenCover();
+        };
+
+        handle.addEventListener('pointerdown', onPointerDown);
+        handle.addEventListener('pointermove', onPointerMove);
+        handle.addEventListener('pointerup', onPointerEnd);
+        handle.addEventListener('pointercancel', onPointerEnd);
+        handle.addEventListener('click', onClick);
+
+        this.fullscreenDismissHandleCleanup = () => {
+            handle.removeEventListener('pointerdown', onPointerDown);
+            handle.removeEventListener('pointermove', onPointerMove);
+            handle.removeEventListener('pointerup', onPointerEnd);
+            handle.removeEventListener('pointercancel', onPointerEnd);
+            handle.removeEventListener('click', onClick);
+            overlay.classList.remove('fullscreen-dragging');
+            overlay.style.removeProperty('--fullscreen-drag-offset');
+            overlay.style.removeProperty('--fullscreen-drag-progress');
+        };
+    }
+
+    setupFullscreenLyricsToggle(overlay) {
+        if (this.fullscreenLyricsToggleCleanup) {
+            this.fullscreenLyricsToggleCleanup();
+            this.fullscreenLyricsToggleCleanup = null;
+        }
+
+        const toggleButtons = [
+            document.getElementById('toggle-fullscreen-lyrics-btn'),
+            document.getElementById('toggle-fullscreen-lyrics-mobile-btn'),
+        ].filter(Boolean);
+        if (toggleButtons.length === 0) return;
+
+        const handleToggle = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.toggleFullscreenLyrics(overlay);
+        };
+
+        toggleButtons.forEach((toggleBtn) => toggleBtn.addEventListener('click', handleToggle));
+        this.updateFullscreenLyricsVisibility(overlay);
+
+        this.fullscreenLyricsToggleCleanup = () => {
+            toggleButtons.forEach((toggleBtn) => toggleBtn.removeEventListener('click', handleToggle));
+        };
+    }
     setupFullscreenControls() {
         const playBtn = document.getElementById('fs-play-pause-btn');
         const prevBtn = document.getElementById('fs-prev-btn');
         const nextBtn = document.getElementById('fs-next-btn');
         const shuffleBtn = document.getElementById('fs-shuffle-btn');
         const repeatBtn = document.getElementById('fs-repeat-btn');
+        const visualizerBtn = document.getElementById('fs-visualizer-btn');
         const progressBar = document.getElementById('fs-progress-bar');
         const progressFill = document.getElementById('fs-progress-fill');
         const currentTimeEl = document.getElementById('fs-current-time');
@@ -1598,43 +2038,33 @@ export class UIRenderer {
 
         updatePlayBtn();
 
-        // Check if radio mode is active — only allow play/pause
-        const isRadioMode = document.getElementById('fullscreen-cover-overlay')?.classList.contains('radio-mode');
-
         playBtn.onclick = () => {
             this.player.handlePlayPause();
             updatePlayBtn();
-            // Sync vinyl spin state immediately
-            const fsOverlay = document.getElementById('fullscreen-cover-overlay');
-            if (fsOverlay?.classList.contains('radio-mode')) {
-                const isPaused = this.player.activeElement.paused;
-                fsOverlay.classList.toggle('radio-paused', isPaused);
+        };
+
+        prevBtn.onclick = () => this.player.playPrev();
+        nextBtn.onclick = () => this.player.playNext();
+
+        shuffleBtn.onclick = () => {
+            this.player.toggleShuffle();
+            shuffleBtn.classList.toggle('active', this.player.shuffleActive);
+        };
+
+        repeatBtn.onclick = async () => {
+            const mode = await this.player.toggleRepeat();
+            repeatBtn.classList.toggle('active', mode !== 0);
+            if (mode === 2) {
+                repeatBtn.innerHTML = SVG_REPEAT_ONE(24);
+            } else {
+                repeatBtn.innerHTML = SVG_REPEAT(24);
             }
         };
 
-        if (isRadioMode) {
-            // Radio mode: block all controls except play/pause
-            prevBtn.onclick = null;
-            nextBtn.onclick = null;
-            shuffleBtn.onclick = null;
-            repeatBtn.onclick = null;
-        } else {
-            prevBtn.onclick = () => this.player.playPrev();
-            nextBtn.onclick = () => this.player.playNext();
-
-            shuffleBtn.onclick = () => {
-                this.player.toggleShuffle();
-                shuffleBtn.classList.toggle('active', this.player.shuffleActive);
-            };
-
-            repeatBtn.onclick = () => {
-                const mode = this.player.toggleRepeat();
-                repeatBtn.classList.toggle('active', mode !== 0);
-                if (mode === 2) {
-                    repeatBtn.innerHTML = SVG_REPEAT_ONE(24);
-                } else {
-                    repeatBtn.innerHTML = SVG_REPEAT(24);
-                }
+        if (visualizerBtn) {
+            visualizerBtn.onclick = async () => {
+                this.fullscreenVisualizerSuppressed = !this.fullscreenVisualizerSuppressed;
+                await this.refreshFullscreenVisualizerState(this.player.activeElement);
             };
         }
 
@@ -1859,6 +2289,7 @@ export class UIRenderer {
             });
 
             this.player.activeElement.addEventListener('volumechange', updateFsVolumeUI);
+            window.addEventListener('volume-change', updateFsVolumeUI);
             updateFsVolumeUI();
         }
 
@@ -1969,6 +2400,72 @@ export class UIRenderer {
             hostControls.style.display = 'none';
             loginBtn.onclick = () => navigate('/account');
         }
+    }
+
+    async renderResetPasswordPage() {
+        await this.showPage('reset-password');
+        const form = document.getElementById('reset-password-form');
+        const errorEl = document.getElementById('reset-password-error');
+        const successEl = document.getElementById('reset-password-success');
+        const btn = document.getElementById('reset-password-submit-btn');
+        const btnText = document.getElementById('reset-password-btn-text');
+        const spinner = document.getElementById('reset-password-btn-spinner');
+        const passwordInput = document.getElementById('reset-password-input');
+        const confirmInput = document.getElementById('reset-password-confirm');
+
+        if (!form) return;
+
+        const params = new URLSearchParams(window.location.search);
+        const userId = params.get('userId');
+        const secret = params.get('secret');
+
+        if (!userId || !secret) {
+            errorEl.textContent = 'Invalid or missing password reset link.';
+            errorEl.style.display = 'block';
+            form.style.display = 'none';
+            return;
+        }
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            errorEl.style.display = 'none';
+            successEl.style.display = 'none';
+
+            const password = passwordInput.value;
+            const confirm = confirmInput.value;
+
+            if (password !== confirm) {
+                errorEl.textContent = 'Passwords do not match.';
+                errorEl.style.display = 'block';
+                return;
+            }
+
+            try {
+                btn.disabled = true;
+                btnText.style.display = 'none';
+                spinner.style.display = 'block';
+
+                await authManager.resetPassword(userId, secret, password, confirm);
+
+                successEl.textContent = 'Password reset successfully. Opening login...';
+                successEl.style.display = 'block';
+                form.style.display = 'none';
+
+                setTimeout(() => {
+                    const authModal = document.getElementById('email-auth-modal');
+                    if (authModal) {
+                        authModal.classList.add('active');
+                    }
+                }, 2000);
+            } catch (error) {
+                errorEl.textContent = error.message || 'Failed to reset password. Please try again.';
+                errorEl.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btnText.style.display = 'inline';
+                spinner.style.display = 'none';
+            }
+        };
     }
 
     async renderPartyDetailPage(id) {
@@ -2199,572 +2696,6 @@ export class UIRenderer {
             if (headerDiv) headerDiv.style.display = 'none';
             if (listContainer) listContainer.innerHTML = '';
         }
-    }
-
-    async renderOfflinePage() {
-        this.showPage('offline');
-
-        const { getAllOfflineTracks, getOfflineStorageUsed, getOfflineTrackCount, removeOfflineTrack, clearAllOfflineTracks, buildPlayableTrack, exportOfflineTracks, importOfflineTracks, markTracksBackedUp, getUnbackedUpCount } = await import('./offline.js');
-        const Clusterize = (await import('clusterize.js')).default;
-        // Inject minimal Clusterize CSS (skip full CSS to avoid max-height conflicts)
-        if (!document.getElementById('clusterize-style')) {
-            const style = document.createElement('style');
-            style.id = 'clusterize-style';
-            style.textContent = '.clusterize-extra-row{margin-top:0!important;margin-bottom:0!important}.clusterize-extra-row.clusterize-keep-parity{display:none}.clusterize-content{outline:0}.clusterize-no-data td{text-align:center}';
-            document.head.appendChild(style);
-        }
-
-        const container = document.getElementById('offline-tracks-container');
-        const scrollEl = document.getElementById('offline-tracks-scroll');
-        const emptyState = document.getElementById('offline-empty-state');
-        const storageInfo = document.getElementById('offline-storage-info');
-        const shuffleBtn = document.getElementById('offline-shuffle-btn');
-        const radioBtn = document.getElementById('offline-radio-btn');
-        const clearBtn = document.getElementById('offline-clear-btn');
-        const searchContainer = document.getElementById('offline-search-container');
-        const trackSearchInput = document.getElementById('offline-track-search-input');
-        const artistSearchInput = document.getElementById('offline-artist-search-input');
-        const artistRow = document.getElementById('offline-artist-row');
-        const exportBtn = document.getElementById('offline-export-btn');
-        const importBtn = document.getElementById('offline-import-btn');
-        const importFile = document.getElementById('offline-import-file');
-
-        const getOfflineArtistNames = (track) => {
-            const artistNames = Array.isArray(track?.artists)
-                ? track.artists.map((artist) => artist?.name).filter(Boolean)
-                : [];
-            const primaryArtistName = track?.artist?.name;
-            if (primaryArtistName && !artistNames.includes(primaryArtistName)) {
-                artistNames.unshift(primaryArtistName);
-            }
-            return artistNames.length > 0 ? artistNames : ['Unknown Artist'];
-        };
-
-
-        // Destroy previous Clusterize instance if exists
-        if (this._offlineClusterize) {
-            this._offlineClusterize.destroy(true);
-            this._offlineClusterize = null;
-        }
-
-        const formatBytes = (bytes) => {
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-        };
-
-        const setBackupButtonLabel = (button, idleLabel, activeLabel, progress = null) => {
-            const label = button?.querySelector('span');
-            if (!label) return;
-            if (!progress) {
-                label.textContent = idleLabel;
-                return;
-            }
-
-            const percent = Math.max(0, Math.min(100, progress.percent || 0));
-            label.textContent = `${activeLabel} ${percent}%`;
-        };
-
-        const render = async () => {
-            const entries = await getAllOfflineTracks();
-            const storageUsed = await getOfflineStorageUsed();
-
-            if (storageInfo) {
-                storageInfo.textContent = `${entries.length} track${entries.length !== 1 ? 's' : ''} • ${formatBytes(storageUsed)} used`;
-            }
-
-            if (entries.length === 0) {
-                if (container) container.innerHTML = '';
-                if (scrollEl) scrollEl.style.display = 'none';
-                if (emptyState) emptyState.style.display = 'block';
-                if (shuffleBtn) shuffleBtn.style.display = 'none';
-                if (radioBtn) radioBtn.style.display = 'none';
-                if (clearBtn) clearBtn.style.display = 'none';
-                if (searchContainer) searchContainer.style.display = 'none';
-                if (artistRow) artistRow.style.display = 'none';
-                if (trackSearchInput) trackSearchInput.value = '';
-                if (artistSearchInput) artistSearchInput.value = '';
-                if (exportBtn) exportBtn.style.display = 'none';
-                this._offlineVisibleTracks = [];
-                if (this._offlineClusterize) {
-                    this._offlineClusterize.destroy(true);
-                    this._offlineClusterize = null;
-                }
-                return;
-            }
-
-            if (emptyState) emptyState.style.display = 'none';
-            if (scrollEl) scrollEl.style.display = '';
-            if (shuffleBtn) shuffleBtn.style.display = 'flex';
-            if (radioBtn) radioBtn.style.display = 'flex';
-            if (clearBtn) clearBtn.style.display = 'flex';
-            if (exportBtn) exportBtn.style.display = 'flex';
-            if (searchContainer) searchContainer.style.display = '';
-
-            // Clear search input on re-render
-            if (trackSearchInput) trackSearchInput.value = '';
-            if (artistSearchInput) artistSearchInput.value = '';
-
-            // Build playable tracks
-            const playableTracks = entries.map(entry => buildPlayableTrack(entry));
-
-            // Store tracks for search/play actions
-            this._offlinePlayableTracks = playableTracks;
-            this._offlineVisibleTracks = playableTracks;
-
-            // Populate artist autocomplete
-            this._offlineSelectedArtist = null;
-            this._offlineArtists = [];
-            this._offlineArtistCounts = {};
-            {
-                const artistCounts = {};
-                playableTracks.forEach(t => {
-                    const name = getOfflineArtistNames(t)[0];
-                    artistCounts[name] = (artistCounts[name] || 0) + 1;
-                });
-                const artists = Object.keys(artistCounts).sort((a, b) => a.localeCompare(b));
-                this._offlineArtists = artists;
-                this._offlineArtistCounts = artistCounts;
-
-                if (artists.length >= 1 && artistSearchInput) {
-                    if (artistRow) artistRow.style.display = '';
-                    this.setupSearchClearButton(artistSearchInput);
-
-                    // Create datalist for autocomplete suggestions
-                    let datalist = document.getElementById('offline-artist-datalist');
-                    if (!datalist) {
-                        datalist = document.createElement('datalist');
-                        datalist.id = 'offline-artist-datalist';
-                        artistSearchInput.parentElement.appendChild(datalist);
-                    }
-                    artistSearchInput.setAttribute('list', 'offline-artist-datalist');
-
-                    // Populate datalist options
-                    datalist.innerHTML = '';
-                    artists.forEach(name => {
-                        const opt = document.createElement('option');
-                        opt.value = name;
-                        opt.label = `${name} (${artistCounts[name]})`;
-                        datalist.appendChild(opt);
-                    });
-
-                    const onArtistSearch = () => {
-                        const val = artistSearchInput.value.trim();
-                        const exactMatch = artists.find(a => a.toLowerCase() === val.toLowerCase());
-                        if (exactMatch) {
-                            this._offlineSelectedArtist = exactMatch;
-                        } else if (val === '') {
-                            this._offlineSelectedArtist = null;
-                        }
-                        applyFilters();
-                    };
-                    if (artistSearchInput._offlineSearchHandler) {
-                        artistSearchInput.removeEventListener('input', artistSearchInput._offlineSearchHandler);
-                    }
-                    artistSearchInput.addEventListener('input', onArtistSearch);
-                    artistSearchInput._offlineSearchHandler = onArtistSearch;
-                } else {
-                    if (artistRow) artistRow.style.display = 'none';
-                }
-            }
-
-            // Generate HTML rows for Clusterize
-            const allRows = playableTracks.map((track, i) => this.createTrackItemHTML(track, i, true));
-
-            // Combined filter function for search + artist
-            const applyFilters = () => {
-                const trackQuery = (trackSearchInput?.value || '').toLowerCase().trim();
-                const selectedArtist = this._offlineSelectedArtist;
-
-                const filtered = playableTracks.reduce((result, track, i) => {
-                    const artistNames = getOfflineArtistNames(track);
-                    const primaryArtistName = artistNames[0];
-
-                    // Artist filter
-                    if (selectedArtist && primaryArtistName !== selectedArtist) {
-                        return result;
-                    }
-
-                    // Track search
-                    if (trackQuery) {
-                        const title = (track.title || '').toLowerCase();
-                        if (!title.includes(trackQuery)) {
-                            return result;
-                        }
-                    }
-
-                    result.rows.push(allRows[i]);
-                    result.tracks.push(track);
-                    return result;
-                }, { rows: [], tracks: [] });
-
-                this._offlineVisibleTracks = filtered.tracks;
-                this._offlineClusterize?.update(filtered.rows.length > 0 ? filtered.rows : ['<div style="text-align:center;padding:2rem;color:var(--muted-foreground)">No matching tracks</div>']);
-            };
-
-            // Helper to attach remove buttons and like state to visible rows
-            const attachOfflineActions = () => {
-                if (!container) return;
-                container.querySelectorAll('.track-item').forEach((el) => {
-                    // Skip already processed items
-                    if (el.dataset.offlineProcessed) return;
-                    el.dataset.offlineProcessed = 'true';
-
-                    const trackId = el.dataset.trackId;
-                    if (!trackId) return;
-
-                    // Bind track data from our stored tracks
-                    const track = playableTracks.find(t => String(t.id) === String(trackId));
-                    if (track) {
-                        trackDataStore.set(el, track);
-                        this.updateLikeState(el, 'track', track.id);
-                    }
-
-                    // Add remove-from-offline button
-                    const actionsArea = el.querySelector('.track-item-actions') || el;
-                    const removeBtn = document.createElement('button');
-                    removeBtn.className = 'btn-icon offline-remove-btn';
-                    removeBtn.title = 'Remove from Offline';
-                    removeBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
-                    removeBtn.style.cssText = 'background: transparent; border: none; color: var(--muted-foreground); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; transition: color 0.2s;';
-                    removeBtn.addEventListener('mouseenter', () => { removeBtn.style.color = 'var(--destructive, #ef4444)'; });
-                    removeBtn.addEventListener('mouseleave', () => { removeBtn.style.color = 'var(--muted-foreground)'; });
-                    removeBtn.addEventListener('click', async (e) => {
-                        e.stopPropagation();
-                        await removeOfflineTrack(parseInt(trackId) || trackId);
-                        showNotification('Track removed from offline');
-                        render();
-                        // Update badge
-                        const count = await getOfflineTrackCount();
-                        const badge = document.getElementById('offline-count-badge');
-                        if (badge) {
-                            badge.textContent = count;
-                            badge.style.display = count > 0 ? 'inline-flex' : 'none';
-                        }
-                    });
-                    actionsArea.appendChild(removeBtn);
-                });
-            };
-
-            // Initialize or update Clusterize
-            if (this._offlineClusterize) {
-                this._offlineClusterize.update(allRows);
-                attachOfflineActions();
-            } else {
-                this._offlineClusterize = new Clusterize({
-                    rows: allRows,
-                    scrollId: 'offline-tracks-scroll',
-                    contentId: 'offline-tracks-container',
-                    rows_in_block: 30,
-                    blocks_in_cluster: 4,
-                    show_no_data_row: true,
-                    no_data_text: 'No offline tracks found.',
-                    tag: 'div',
-                    callbacks: {
-                        clusterChanged: () => {
-                            attachOfflineActions();
-                        }
-                    }
-                });
-                attachOfflineActions();
-            }
-
-            // Setup click handler for playing tracks (delegated on container)
-            if (!container._offlineClickBound) {
-                container.addEventListener('click', (e) => {
-                    const trackItem = e.target.closest('.track-item');
-                    if (!trackItem) return;
-                    // Don't play if clicked on a button
-                    if (e.target.closest('button')) return;
-
-                    const trackId = trackItem.dataset.trackId;
-                    const visibleTracks = this._offlineVisibleTracks || this._offlinePlayableTracks;
-                    if (!trackId || !visibleTracks) return;
-
-                    const trackIndex = visibleTracks.findIndex(t => String(t.id) === String(trackId));
-                    if (trackIndex >= 0) {
-                        this.player.setQueue([...visibleTracks], trackIndex);
-                        this.player.playTrackFromQueue();
-                    }
-                });
-                container._offlineClickBound = true;
-            }
-
-            // Setup search filtering using combined filter (search + artist)
-            if (trackSearchInput) {
-                if (trackSearchInput._offlineSearchHandler) {
-                    trackSearchInput.removeEventListener('input', trackSearchInput._offlineSearchHandler);
-                }
-                this.setupSearchClearButton(trackSearchInput);
-                trackSearchInput.addEventListener('input', applyFilters);
-                trackSearchInput._offlineSearchHandler = applyFilters;
-            }
-
-        };
-
-        await render();
-
-        // Shuffle all
-        if (shuffleBtn) {
-            shuffleBtn.onclick = async () => {
-                const entries = await getAllOfflineTracks();
-                if (entries.length === 0) return;
-                const tracks = entries.map(e => buildPlayableTrack(e));
-                const shuffled = [...tracks].sort(() => Math.random() - 0.5);
-                this.player.shuffleActive = true;
-                this.player.setQueue(shuffled, 0);
-                this.player.playAtIndex(0);
-                showNotification(`Shuffling ${shuffled.length} offline tracks`);
-            };
-        }
-
-        // Offline Radio 24h — endless shuffle with repeat all, uses current artist filter
-        if (radioBtn) {
-            // Update button visual state
-            const updateRadioBtnState = () => {
-                const isActive = this._offlineRadioActive === true;
-                radioBtn.classList.toggle('offline-radio-active', isActive);
-                const label = radioBtn.querySelector('span');
-                const selectedArtist = this._offlineSelectedArtist;
-                if (isActive) {
-                    const artistLabel = selectedArtist ? `${selectedArtist}` : 'all tracks';
-                    if (label) label.textContent = `📻 Radio ON — ${artistLabel}`;
-                    radioBtn.title = 'Stop Offline Radio';
-                } else {
-                    const filterLabel = selectedArtist ? `Start Radio — ${selectedArtist} only` : 'Start Radio with all tracks';
-                    if (label) label.textContent = filterLabel;
-                    radioBtn.title = 'Offline Radio 24h';
-                }
-            };
-            updateRadioBtnState();
-
-            // Update label when artist filter changes
-            if (artistSearchInput) {
-                artistSearchInput.addEventListener('input', () => {
-                    setTimeout(updateRadioBtnState, 10);
-                });
-            }
-
-            radioBtn.onclick = async () => {
-                if (this._offlineRadioActive) {
-                    // Close fullscreen → which turns off radio and restores everything
-                    this.closeFullscreenCover();
-                    showNotification('Offline Radio stopped');
-                    return;
-                }
-
-                // Use currently visible/filtered tracks
-                const visibleTracks = this._offlineVisibleTracks || this._offlinePlayableTracks || [];
-                if (visibleTracks.length === 0) {
-                    showNotification('No tracks available for radio');
-                    return;
-                }
-
-                // Fisher-Yates shuffle for better randomness
-                const shuffled = [...visibleTracks];
-                for (let i = shuffled.length - 1; i > 0; i--) {
-                    const j = Math.floor(Math.random() * (i + 1));
-                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-                }
-
-                this._offlineRadioActive = true;
-                this.player.setQueue(shuffled, 0);
-                this.player.shuffleActive = true; // must be AFTER setQueue (which resets it to false)
-                this.player.repeatMode = 1; // REPEAT_MODE.ALL (0=OFF, 1=ALL, 2=ONE)
-                this.player.playAtIndex(0);
-                updateRadioBtnState();
-
-                const artistLabel = this._offlineSelectedArtist || 'All';
-                showNotification(`📻 Offline Radio — ${shuffled.length} tracks (${artistLabel})`);
-                window.dispatchEvent(new CustomEvent('repeat-mode-changed'));
-
-                // Auto-open fullscreen player with radio query
-                window.history.pushState({ fullscreen: true, radio: true }, '', '#fullscreen?radio=true');
-                const nextTrack = shuffled.length > 1 ? shuffled[1] : null;
-                this.showFullscreenCover(shuffled[0], nextTrack, null, this.player.activeElement);
-            };
-        }
-
-        // Clear all
-        if (clearBtn) {
-            clearBtn.onclick = async () => {
-                if (!confirm('Remove all offline tracks? This cannot be undone.')) return;
-                await clearAllOfflineTracks();
-                showNotification('All offline tracks removed');
-                render();
-                const badge = document.getElementById('offline-count-badge');
-                if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
-            };
-        }
-
-        // Export — incremental by default (only new tracks since last backup)
-        // Detect iOS/iPadOS — ALL browsers on iOS/iPadOS are WebKit under the hood,
-        // so <a download> never works reliably. Use Web Share or window.open.
-        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
-            || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
-
-        const triggerBlobDownload = async (blob, filename) => {
-            // 1. Web Share API — best on mobile (iOS 15.4+, Android)
-            if (navigator.canShare) {
-                try {
-                    const file = new File([blob], filename, { type: 'application/octet-stream' });
-                    if (navigator.canShare({ files: [file] })) {
-                        await navigator.share({ files: [file] });
-                        return;
-                    }
-                } catch (err) {
-                    if (err.name === 'AbortError') return; // user cancelled share
-                    console.warn('Web Share failed, falling back to download:', err.message);
-                    // Fall through to platform-specific fallback
-                }
-            }
-
-            const url = URL.createObjectURL(blob);
-
-            // 2. iOS/iPadOS fallback — <a download> doesn't work on ANY iOS browser
-            //    (Chrome, Firefox, Safari — all WebKit). Open blob in new tab.
-            if (isIOS) {
-                window.open(url, '_blank');
-                // Keep blob URL alive for 2 min so the new tab can load
-                setTimeout(() => URL.revokeObjectURL(url), 120000);
-                return;
-            }
-
-            // 3. Standard download link (Android Chrome, desktop fallback)
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            a.style.display = 'none';
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }, 120000); // 2 min — mobile downloads can be slow
-        };
-
-        if (exportBtn) {
-            // Show unbacked-up count on the button label
-            const updateExportLabel = async () => {
-                const newCount = await getUnbackedUpCount();
-                const label = exportBtn.querySelector('span');
-                if (label) {
-                    label.textContent = newCount > 0 ? `Export (${newCount} new)` : 'Export';
-                }
-            };
-            updateExportLabel();
-
-            exportBtn.onclick = async () => {
-                try {
-                    exportBtn.disabled = true;
-                    const newCount = await getUnbackedUpCount();
-                    const useIncremental = newCount > 0;
-                    const date = new Date().toISOString().slice(0, 10);
-                    setBackupButtonLabel(exportBtn, 'Export', 'Exporting', { percent: 0 });
-
-                    // Mobile: stream chunks one-at-a-time to avoid OOM
-                    const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
-                        || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
-
-                    const onChunkReady = isMobileDevice ? async (blob, chunkIdx) => {
-                        setBackupButtonLabel(exportBtn, 'Export', `Saving part ${chunkIdx}`, { percent: 0 });
-                        await triggerBlobDownload(blob, `monochrome-offline-${date}-part${chunkIdx}.mcbackup`);
-                    } : null;
-
-                    const result = await exportOfflineTracks((progress) => {
-                        setBackupButtonLabel(exportBtn, 'Export', 'Exporting', progress);
-                    }, { incremental: useIncremental, onChunkReady });
-
-                    if (result.method === 'streamed') {
-                        let msg = `Exported ${result.count} tracks`;
-                        if (result.chunkCount > 1) msg += ` in ${result.chunkCount} files`;
-                        msg += ` (${formatBytes(result.totalBytes)})`;
-                        if (result.remaining > 0) {
-                            msg += `. ${result.remaining} remaining — tap Export again`;
-                        }
-                        showNotification(msg);
-                    } else if (result.method === 'chunked-download' && result.chunks) {
-                        for (let ci = 0; ci < result.chunks.length; ci++) {
-                            const chunk = result.chunks[ci];
-                            await triggerBlobDownload(chunk.blob, `monochrome-offline-${date}-part${ci + 1}.mcbackup`);
-                            if (ci < result.chunks.length - 1) {
-                                await new Promise(r => setTimeout(r, 1000));
-                            }
-                        }
-                        showNotification(`Offline backup split into ${result.chunks.length} files (${formatBytes(result.totalBytes)} total)`);
-                    } else if (result?.blob) {
-                        await triggerBlobDownload(result.blob, `monochrome-offline-${date}.mcbackup`);
-                        showNotification(`Offline backup ready (${formatBytes(result.totalBytes)})`);
-                    } else {
-                        showNotification(`Offline backup saved and verified (${formatBytes(result?.totalBytes || 0)})`);
-                    }
-
-                    // Mark exported tracks as backed up
-                    if (result.exportedKeys) {
-                        await markTracksBackedUp(result.exportedKeys);
-                    }
-                } catch (err) {
-                    if (err.message !== 'Export cancelled') {
-                        showNotification(err.message || 'Export failed');
-                    }
-                } finally {
-                    exportBtn.disabled = false;
-                    updateExportLabel();
-                }
-            };
-        }
-
-        // Import (supports selecting multiple .mcbackup files at once)
-        if (importBtn && importFile) {
-            importBtn.onclick = () => importFile.click();
-            importFile.onchange = async () => {
-                const files = [...(importFile.files || [])];
-                if (files.length === 0) return;
-                try {
-                    importBtn.disabled = true;
-                    let totalImported = 0;
-                    let totalSkipped = 0;
-
-                    for (let fi = 0; fi < files.length; fi++) {
-                        const label = files.length > 1
-                            ? `Importing ${fi + 1}/${files.length}`
-                            : 'Importing';
-                        setBackupButtonLabel(importBtn, 'Import', label, { percent: 0 });
-                        const result = await importOfflineTracks(files[fi], (progress) => {
-                            setBackupButtonLabel(importBtn, 'Import', label, progress);
-                        });
-                        totalImported += result.imported;
-                        totalSkipped += result.skipped;
-                    }
-
-                    let msg = `Imported ${totalImported} track${totalImported !== 1 ? 's' : ''}`;
-                    if (files.length > 1) msg += ` from ${files.length} files`;
-                    if (totalSkipped > 0) msg += `, ${totalSkipped} already existed`;
-                    showNotification(msg);
-                    render();
-                    // Update badge
-                    const count = await getOfflineTrackCount();
-                    const badge = document.getElementById('offline-count-badge');
-                    if (badge) {
-                        badge.textContent = count;
-                        badge.style.display = count > 0 ? 'inline-flex' : 'none';
-                    }
-                } catch (err) {
-                    showNotification(err.message || 'Import failed');
-                } finally {
-                    importBtn.disabled = false;
-                    setBackupButtonLabel(importBtn, 'Import', 'Importing');
-                    importFile.value = '';
-                }
-            };
-        }
-
-        // Listen for external changes
-        const handler = () => { if (this.currentPage === 'offline') render(); };
-        window.removeEventListener('offline-tracks-changed', handler);
-        window.addEventListener('offline-tracks-changed', handler);
     }
 
     async renderHomePage() {
@@ -3078,13 +3009,22 @@ export class UIRenderer {
     }
 
     async getSeeds() {
+        try {
+            const { smartRecommendations } = await import('./smart-recommendations.js');
+            const { autoplaySettings } = await import('./storage.js');
+            if (autoplaySettings.isSmartRecsEnabled()) {
+                const smartSeeds = await smartRecommendations.getSmartSeeds(50);
+                if (smartSeeds.length > 0) return smartSeeds;
+            }
+        } catch (e) {
+            console.warn('Smart seeds failed, using basic seeds:', e);
+        }
+
         const history = await db.getHistory();
         const favorites = await db.getFavorites('track');
         const playlists = await db.getPlaylists(true);
         const playlistTracks = playlists.flatMap((p) => p.tracks || []);
 
-        // Prioritize: Playlists > Favorites > History
-        // Take random samples from each to form seeds
         const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
 
         const combined = [
@@ -3118,7 +3058,7 @@ export class UIRenderer {
             if (forceRefresh || songsContainer.children.length === 0) {
                 songsContainer.innerHTML = this.createSkeletonTracks(10, true);
             } else if (!songsContainer.querySelector('.skeleton')) {
-                return; // Already loaded
+                return;
             }
 
             try {
@@ -3135,10 +3075,21 @@ export class UIRenderer {
                     ...history.map((t) => t.id),
                 ]);
 
-                const recommendedTracks = await this.api.getRecommendedTracksForPlaylist(seeds, 20, {
+                let recommendedTracks = await this.api.getRecommendedTracksForPlaylist(seeds, 20, {
                     skipCache: forceRefresh,
                     knownTrackIds: knownTrackIds,
                 });
+
+                try {
+                    const { smartRecommendations } = await import('./smart-recommendations.js');
+                    const { autoplaySettings } = await import('./storage.js');
+                    if (autoplaySettings.isSmartRecsEnabled()) {
+                        recommendedTracks = smartRecommendations.filterRecommendations(recommendedTracks);
+                        recommendedTracks = smartRecommendations.rankRecommendations(recommendedTracks);
+                    }
+                } catch (e) {
+                    console.warn('Smart filtering failed for home songs:', e);
+                }
 
                 const filteredTracks = await this.filterUserContent(recommendedTracks, 'track');
                 this.lastRecommendedTracks = filteredTracks;
@@ -3301,6 +3252,8 @@ export class UIRenderer {
                                     audioQuality: item.audioQuality,
                                     mediaMetadata: item.mediaMetadata,
                                     type: 'ALBUM',
+                                    _lazy: cardsHTML.length >= 6,
+                                    _isEditorsPick: true,
                                 };
                                 cardsHTML.push(this.createAlbumCardHTML(album));
                                 itemsToStore.push({ el: null, data: album, type: 'album' });
@@ -3308,6 +3261,8 @@ export class UIRenderer {
                                 // Fall back to API call for legacy format
                                 const result = await this.api.getAlbum(item.id);
                                 if (result && result.album) {
+                                    result.album._lazy = cardsHTML.length >= 6;
+                                    result.album._isEditorsPick = true;
                                     cardsHTML.push(this.createAlbumCardHTML(result.album));
                                     itemsToStore.push({ el: null, data: result.album, type: 'album' });
                                 }
@@ -3330,6 +3285,8 @@ export class UIRenderer {
                                         releaseDate: item.releaseDate,
                                         type: 'ALBUM',
                                         _href: `/userplaylist/${item.id}`,
+                                        _lazy: cardsHTML.length >= 6,
+                                        _isEditorsPick: true,
                                     })
                                 );
                                 itemsToStore.push({ el: null, data: playlist, type: 'user-playlist' });
@@ -3341,6 +3298,8 @@ export class UIRenderer {
                                     id: item.id,
                                     name: item.name,
                                     picture: item.picture,
+                                    _lazy: cardsHTML.length >= 6,
+                                    _isEditorsPick: true,
                                 };
                                 cardsHTML.push(this.createArtistCardHTML(artist));
                                 itemsToStore.push({ el: null, data: artist, type: 'artist' });
@@ -3348,6 +3307,8 @@ export class UIRenderer {
                                 // Fall back to API call
                                 const artist = await this.api.getArtist(item.id);
                                 if (artist) {
+                                    artist._lazy = cardsHTML.length >= 6;
+                                    artist._isEditorsPick = true;
                                     cardsHTML.push(this.createArtistCardHTML(artist));
                                     itemsToStore.push({ el: null, data: artist, type: 'artist' });
                                 }
@@ -3364,6 +3325,8 @@ export class UIRenderer {
                                     audioQuality: item.audioQuality,
                                     mediaMetadata: item.mediaMetadata,
                                     duration: item.duration,
+                                    _lazy: cardsHTML.length >= 6,
+                                    _isEditorsPick: true,
                                 };
                                 cardsHTML.push(this.createTrackCardHTML(track));
                                 itemsToStore.push({ el: null, data: track, type: 'track' });
@@ -3371,6 +3334,8 @@ export class UIRenderer {
                                 // Fall back to API call
                                 const track = await this.api.getTrackMetadata(item.id);
                                 if (track) {
+                                    track._lazy = cardsHTML.length >= 6;
+                                    track._isEditorsPick = true;
                                     cardsHTML.push(this.createTrackCardHTML(track));
                                     itemsToStore.push({ el: null, data: track, type: 'track' });
                                 }
@@ -3383,6 +3348,8 @@ export class UIRenderer {
                                     cover: item.cover,
                                     tracks: item.tracks || [],
                                     numberOfTracks: item.numberOfTracks || (item.tracks ? item.tracks.length : 0),
+                                    _lazy: cardsHTML.length >= 6,
+                                    _isEditorsPick: true,
                                 };
                                 const subtitle = item.username ? `by ${item.username}` : null;
                                 cardsHTML.push(this.createUserPlaylistCardHTML(playlist, subtitle));
@@ -3390,6 +3357,8 @@ export class UIRenderer {
                             } else {
                                 const playlist = await syncManager.getPublicPlaylist(item.id);
                                 if (playlist) {
+                                    playlist._lazy = cardsHTML.length >= 6;
+                                    playlist._isEditorsPick = true;
                                     const subtitle = item.username ? `by ${item.username}` : null;
                                     cardsHTML.push(this.createUserPlaylistCardHTML(playlist, subtitle));
                                     itemsToStore.push({ el: null, data: playlist, type: 'user-playlist' });
@@ -3750,9 +3719,12 @@ export class UIRenderer {
                 finalAlbums = Array.from(albumMap.values());
             }
 
+            finalTracks = finalTracks.filter((t) => !_isBlockedCopyright(t.copyright));
+            finalVideos = finalVideos.filter((t) => !_isBlockedCopyright(t.copyright));
+            finalAlbums = finalAlbums.filter((t) => !_isBlockedCopyright(t.copyright));
+
             // Track search with results
             const totalResults = finalTracks.length + finalArtists.length + finalAlbums.length + finalPlaylists.length;
-            trackSearch(query, totalResults);
 
             if (finalTracks.length) {
                 await this.renderListWithTracks(tracksContainer, finalTracks, true, false, false, true);
@@ -3914,6 +3886,8 @@ export class UIRenderer {
         const titleEl = document.getElementById('album-detail-title');
         const metaEl = document.getElementById('album-detail-meta');
         const prodEl = document.getElementById('album-detail-producer');
+        const rateCriticsEl = document.getElementById('album-detail-ratings-critics');
+        const rateUsersEl = document.getElementById('album-detail-ratings-users');
         const tracklistContainer = document.getElementById('album-detail-tracklist');
         const playBtn = document.getElementById('play-album-btn');
         if (playBtn) playBtn.innerHTML = `${SVG_PLAY(20)}<span>Play Album</span>`;
@@ -3927,6 +3901,8 @@ export class UIRenderer {
         titleEl.innerHTML = '<div class="skeleton" style="height: 48px; width: 300px; max-width: 90%;"></div>';
         metaEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
         prodEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
+        rateCriticsEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
+        rateUsersEl.innerHTML = '<div class="skeleton" style="height: 16px; width: 200px; max-width: 80%;"></div>';
         tracklistContainer.innerHTML = `
             <div class="track-list-header">
                 <span style="width: 40px; text-align: center;">#</span>
@@ -3940,6 +3916,22 @@ export class UIRenderer {
         try {
             const { album, tracks } = await this.api.getAlbum(albumId, provider);
             this.currentAlbumId = albumId;
+
+            if (_isBlockedCopyright(album.copyright)) {
+                imageEl.src = '';
+                imageEl.style.backgroundColor = 'transparent';
+                titleEl.textContent = '';
+                metaEl.textContent = '';
+                prodEl.textContent = '';
+                rateCriticsEl.textContent = '';
+                rateUsersEl.textContent = '';
+                tracklistContainer.innerHTML = '';
+                if (playBtn) playBtn.style.display = 'none';
+                if (dlBtn) dlBtn.style.display = 'none';
+                document.getElementById('page-album').innerHTML =
+                    '<p style="padding: 2rem; color: var(--muted-foreground);">This content is unavailable due to a DMCA notice.</p>';
+                return;
+            }
 
             const videoCoverUrl = album.videoCoverUrl || null;
 
@@ -4036,6 +4028,87 @@ export class UIRenderer {
             prodEl.innerHTML =
                 `By <a href="/artist/${album.artist.id}">${album.artist.name}</a>` +
                 (firstCopyright ? ` • ${firstCopyright}` : '');
+
+            async function fetchAotyWorker(album, artist) {
+                try {
+                    const response = await fetch(
+                        `https://aoty-api.hnh65483.workers.dev/?artist=${artist}&album=${album}`
+                    );
+                    const data = await response.json();
+
+                    const critviews = data.critic.reviews || [];
+
+                    rateCriticsEl.innerHTML = `<a href="javascript:void(0)" style="color: var(--muted-foreground); cursor: pointer;">Critic Score: ${data.critic.score}, Based on <span style="text-decoration: underline;">${data.critic.count} reviews</span></a>`;
+
+                    if (data.critic.score == 'NR') {
+                        rateCriticsEl.innerHTML = `<a style="color: var(--muted-foreground);">Critic Score Not Available Yet</a>`;
+                    } else {
+                        rateCriticsEl.querySelector('a').onclick = () => {
+                            const con = document.createElement('div');
+                            con.style.display = 'flex';
+                            con.style.flexDirection = 'column';
+                            con.style.gap = '1.5rem';
+
+                            critviews.forEach((review) => {
+                                const reviewdiv = document.createElement('div');
+                                reviewdiv.style.display = 'flex';
+                                reviewdiv.style.gap = '1rem';
+                                reviewdiv.style.paddingBottom = '1rem';
+                                reviewdiv.style.borderBottom = '1px solid var(--border)';
+
+                                const publication = decodeHtml(
+                                    review.publication || review.source || 'Unknown Publication'
+                                );
+                                const author = decodeHtml(review.author || '');
+                                const quote = decodeHtml(review.text || review.quote || 'No review text available.');
+
+                                reviewdiv.innerHTML = `
+                                    <img src="${review.image}" width="50" height="50" style="border-radius: 8px; object-fit: cover; background: var(--highlight);"
+                                         onerror="this.src='images/monochrome-logo.svg'; this.onerror=null;"
+                                         loading="lazy"
+                                         referrerpolicy="no-referrer">
+                                    <div style="flex: 1;">
+                                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.25rem;">
+                                            <div class="pub-name" style="font-weight: 600; color: var(--foreground);"></div>
+                                            <div style="font-weight: bold; color: var(--primary-foreground); background: var(--primary); padding: 2px 10px; border-radius: 6px; font-size: 0.85rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">${review.score}</div>
+                                        </div>
+                                        <div class="author-name" style="font-size: 0.8rem; color: var(--muted-foreground); margin-bottom: 0.5rem;"></div>
+                                        <div class="quote-text" style="font-size: 0.95rem; line-height: 1.5; color: var(--muted-foreground); font-style: italic;"></div>
+                                    </div>
+                                `;
+
+                                reviewdiv.querySelector('.pub-name').textContent = publication;
+                                if (author) {
+                                    reviewdiv.querySelector('.author-name').textContent = `By ${author}`;
+                                } else {
+                                    reviewdiv.querySelector('.author-name').remove();
+                                }
+                                reviewdiv.querySelector('.quote-text').textContent = `"${quote}"`;
+
+                                con.appendChild(reviewdiv);
+                            });
+
+                            if (critviews.length === 0) {
+                                con.innerHTML =
+                                    '<div style="text-align: center; padding: 2rem; color: var(--muted-foreground);">No reviews found.</div>';
+                            }
+
+                            createModal({
+                                title: 'Critics Reviews',
+                                content: con,
+                                className: 'extra-wide',
+                            });
+                        };
+                    }
+
+                    rateUsersEl.innerHTML = `<a href="${data.url}" target="_blank" style="color: var(--muted-foreground);">User Score: <span style="text-decoration: underline;">${data.user.score}</span>, Based on ${data.user.count} reviews</a>`;
+                } catch (e) {
+                    rateCriticsEl.innerHTML = `<a style="color: var(--muted-foreground);">Unable to Fetch Critic Score</a>`;
+                    rateUsersEl.innerHTML = `<a style="color: var(--muted-foreground);">Unable to Fetch User Score</a>`;
+                }
+            }
+
+            fetchAotyWorker(album.title, album.artist.name);
 
             tracklistContainer.innerHTML = `
                 <div class="track-list-header">
@@ -4836,6 +4909,16 @@ export class UIRenderer {
         await this.showPage('artist');
         this.currentArtistId = artistId;
 
+        const bannerContainer = document.getElementById('artist-detail-banner-container');
+        if (bannerContainer) {
+            const oldVideo = bannerContainer.querySelector('video');
+            if (oldVideo && oldVideo._hls) {
+                oldVideo._hls.destroy();
+            }
+            bannerContainer.innerHTML = '';
+            bannerContainer.style.opacity = '0';
+        }
+
         const imageEl = document.getElementById('artist-detail-image');
         const nameEl = document.getElementById('artist-detail-name');
         const metaEl = document.getElementById('artist-detail-meta');
@@ -4883,6 +4966,39 @@ export class UIRenderer {
 
         try {
             const artist = await this.api.getArtist(artistId, provider);
+
+            const currentId = this.currentArtistId;
+            this.api
+                .getArtistBanner(artist.name)
+                .then(async (banner) => {
+                    if (this.currentArtistId !== currentId) return;
+
+                    if (banner && banner.hlsUrl && bannerContainer) {
+                        const video = document.createElement('video');
+                        video.autoplay = true;
+                        video.loop = true;
+                        video.muted = true;
+                        video.playsInline = true;
+                        video.setAttribute('muted', '');
+                        video.setAttribute('autoplay', '');
+                        video.setAttribute('playsinline', '');
+                        video.style.opacity = '1';
+
+                        try {
+                            await this.setupHlsVideo(video, banner, null);
+                            if (this.currentArtistId === currentId) {
+                                bannerContainer.appendChild(video);
+                                bannerContainer.style.opacity = '1';
+                                video.play().catch(() => {});
+                            }
+                        } catch (e) {
+                            console.warn('Failed to setup artist banner video:', e);
+                        }
+                    }
+                })
+                .catch((e) => {
+                    console.warn('Failed to fetch artist banner:', e);
+                });
 
             // Handle Biography
             if (bioEl) {
@@ -5111,6 +5227,10 @@ export class UIRenderer {
                     socialsEl.innerHTML = links.map((link) => this.createSocialLinkHTML(link)).join('');
                 }
             });
+
+            artist.tracks = artist.tracks.filter((t) => !_isBlockedCopyright(t.copyright));
+            artist.albums = artist.albums.filter((t) => !_isBlockedCopyright(t.copyright));
+            if (artist.eps) artist.eps = artist.eps.filter((t) => !_isBlockedCopyright(t.copyright));
 
             await this.renderListWithTracks(tracksContainer, artist.tracks, true);
 
@@ -5733,7 +5853,6 @@ export class UIRenderer {
                 const handleSort = async (ev) => {
                     const li = ev.target.closest('li');
                     if (li && li.dataset.sort) {
-                        trackChangeSort(li.dataset.sort);
                         await onSort(li.dataset.sort);
                         closeMenu();
                     }
@@ -6063,6 +6182,12 @@ export class UIRenderer {
             track = await this.api.getTrackMetadata(trackId);
             this.currentTrackPageId = track.id;
 
+            if (_isBlockedCopyright(track.copyright)) {
+                document.getElementById('page-track').innerHTML =
+                    '<p style="padding: 2rem; color: var(--muted-foreground);">This content is unavailable due to a DMCA notice.</p>';
+                return;
+            }
+
             let videoCoverUrl = track.videoUrl || track.videoCoverUrl || track.album?.videoCoverUrl || null;
 
             if (!videoCoverUrl && (track.album || track.type === 'video')) {
@@ -6165,6 +6290,7 @@ export class UIRenderer {
 
             playBtn.onclick = () => {
                 this.player.setQueue([track], 0);
+                this.player.enableAutoplay();
                 this.player.playTrackFromQueue();
             };
 

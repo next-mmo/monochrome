@@ -16,14 +16,17 @@ import {
     exponentialVolumeSettings,
     audioEffectsSettings,
     radioSettings,
-    contentBlockingSettings,
+    autoplaySettings,
+    binauralDspSettings,
 } from './storage.js';
 import { audioContextManager } from './audio-context.js';
 import { isIos, isSafari } from './platform-detection.js';
 import { db } from './db.js';
+import { getProxyUrl } from './proxy-utils.js';
 
 import { SVG_CLOCK, SVG_ATMOS } from './icons.js';
 import { UIRenderer } from './ui.js';
+import { MediaSession } from '@capgo/capacitor-media-session';
 
 export class Player {
     static #instance = null;
@@ -36,7 +39,7 @@ export class Player {
     }
 
     /** @private */
-    constructor(audioElement, api, quality = 'HI_RES_LOSSLESS') {
+    constructor(audioElement, api, quality = 'LOSSLESS') {
         this.audio = audioElement;
         this.video = document.getElementById('video-player');
         this.api = api;
@@ -48,6 +51,8 @@ export class Player {
         this.shuffleActive = false;
         this.repeatMode = REPEAT_MODE.OFF;
         this.preloadCache = new Map();
+        this._pendingPreload = false;
+        setInterval(this.checkPreloadConditions.bind(this), 2000);
         this.preloadAbortController = null;
         this.currentTrack = null;
         this.currentRgValues = null;
@@ -55,10 +60,6 @@ export class Player {
         this.isFallbackRetry = false;
         this.isFallbackInProgress = false;
         this.autoplayBlocked = false;
-        // iOS preloaded audio element for seamless background track transitions
-        this._iosPreloadedAudio = null;
-        this._iosPreloadedTrackId = null;
-        this._iosPreloadedStreamUrl = null;
         this.isIOS = isIos;
         this.isPwa =
             typeof window !== 'undefined' &&
@@ -101,6 +102,24 @@ export class Player {
             });
         }
 
+        const waitForImagesLoading = () => {
+            const images = Array.from(document.images).filter((img) => !img.complete);
+            if (images.length === 0) return Promise.resolve();
+            return Promise.all(
+                images.map(
+                    (img) =>
+                        new Promise((res) => {
+                            img.onload = img.onerror = res;
+                        })
+                )
+            );
+        };
+
+        if (document.readyState !== 'complete') {
+            await new Promise((resolve) => window.addEventListener('load', resolve));
+        }
+        await waitForImagesLoading();
+
         // Initialize Shaka player
         const shaka = await import('shaka-player');
         shaka.polyfill.installAll();
@@ -115,16 +134,24 @@ export class Player {
                 },
                 abr: {
                     enabled: true,
-                    // Start with a low bandwidth estimate (200kbps) so it plays instantly
-                    // on slow connections and smoothly scales UP to Hi-Fi if the connection allows.
                     defaultBandwidthEstimate: 100000,
-                    switchInterval: 1, // Check more frequently
-                    bandwidthDowngradeTarget: 0.8, // Downgrade more aggressively if bandwidth drops
+                    switchInterval: 1,
+                    bandwidthDowngradeTarget: 0.8,
                     restrictToElementSize: false,
                 },
                 mediaSource: {
                     codecSwitchingStrategy: 'smooth',
                 },
+            });
+            this.shakaPlayer.getNetworkingEngine().registerRequestFilter((type, request) => {
+                if (type === shaka.net.NetworkingEngine.RequestType.SEGMENT) {
+                    const uris = request.uris;
+                    for (let i = 0; i < uris.length; i++) {
+                        if (uris[i].includes('tidal.com')) {
+                            uris[i] = getProxyUrl(uris[i]);
+                        }
+                    }
+                }
             });
             this.shakaPlayer.addEventListener('adaptation', this.updateAdaptiveQualityBadge.bind(this));
             this.shakaPlayer.addEventListener('variantchanged', this.updateAdaptiveQualityBadge.bind(this));
@@ -145,15 +172,32 @@ export class Player {
         this.isFetchingRadio = false;
         this.radioFetchPromise = null;
 
+        this.autoplayEnabled = autoplaySettings.isEnabled();
+        this.autoplaySeeds = [];
+        this.isFetchingAutoplay = false;
+        this.autoplayFetchPromise = null;
+        this._recentlyPlayedIds = [];
+        this._maxRecentlyPlayed = 100;
+
         this.playbackSequence = 0;
 
         window.addEventListener('beforeunload', async () => {
             await this.saveQueueState();
+            import('./listening-tracker.js')
+                .then(({ listeningTracker }) => {
+                    listeningTracker.onTrackEnd();
+                    listeningTracker.forceFlush();
+                })
+                .catch(() => {});
         });
 
-        // Handle visibility change for iOS - AudioContext gets suspended when screen locks
+        // Handle visibility change - AudioContext can be suspended when backgrounded
         document.addEventListener('visibilitychange', async () => {
             const el = this.activeElement;
+            if (document.visibilityState === 'hidden' && !el.paused) {
+                // Proactively resume context when going to background to prevent suspension
+                void audioContextManager.resume();
+            }
             if (document.visibilityState === 'visible' && !el.paused) {
                 // Ensure audio context is resumed when user returns to the app
                 if (!audioContextManager.isReady()) {
@@ -163,20 +207,34 @@ export class Player {
             }
             if (document.visibilityState === 'visible' && this.autoplayBlocked) {
                 this.autoplayBlocked = false;
-                // If audio has no source (queue advance failed while backgrounded), retry from queue
-                if (!el.src || el.error) {
-                    this.playTrackFromQueue(0, 0);
-                } else {
-                    el.play().catch(() => {});
-                }
-            }
-            // iOS: start preloading the next track into a buffer element when visible
-            if (document.visibilityState === 'visible' && this.isIOS) {
-                this._iosPreloadNextTrackElement();
+                el.play().catch(() => {});
             }
         });
 
         this._setupVideoSync();
+        this._setupAnimatedCoverSync();
+    }
+
+    _setupAnimatedCoverSync() {
+        const syncPlayPause = () => {
+            const isPaused = this.activeElement.paused;
+            document.querySelectorAll('.cover, #fullscreen-cover-image').forEach((el) => {
+                if (el.tagName === 'VIDEO' && el !== this.video) {
+                    if (isPaused) {
+                        el.pause();
+                    } else {
+                        el.play().catch(() => {});
+                    }
+                }
+            });
+        };
+
+        this.audio.addEventListener('play', syncPlayPause);
+        this.audio.addEventListener('pause', syncPlayPause);
+        if (this.video) {
+            this.video.addEventListener('play', syncPlayPause);
+            this.video.addEventListener('pause', syncPlayPause);
+        }
     }
 
     _setupVideoSync() {
@@ -245,21 +303,7 @@ export class Player {
 
         const el = this.activeElement;
 
-        // Apply to audio element and/or Web Audio graph
-        const isApple = isIos || isSafari;
-
-        if (audioContextManager.isReady() && !isApple) {
-            // If Web Audio is active, we apply volume there for better compatibility
-            // Especially on Linux where audio.volume might not affect the Web Audio graph
-            el.volume = 1.0;
-            audioContextManager.setVolume(effectiveVolume);
-        } else {
-            // Safari bypasses WebAudio for HLS, so we MUST set el.volume directly to reflect ReplayGain
-            if (audioContextManager.isReady()) {
-                audioContextManager.setVolume(1.0); // Reset graph gain if it somehow routes
-            }
-            el.volume = Math.max(0, Math.min(1, effectiveVolume));
-        }
+        el.volume = Math.max(0, Math.min(1, effectiveVolume));
     }
 
     applyAudioEffects() {
@@ -281,7 +325,8 @@ export class Player {
     }
 
     setPlaybackSpeed(speed) {
-        const validSpeed = Math.max(0.01, Math.min(100, parseFloat(speed) || 1.0));
+        const parsed = parseFloat(speed);
+        const validSpeed = Math.max(0.01, Math.min(100, isNaN(parsed) ? 1.0 : parsed));
         audioEffectsSettings.setSpeed(validSpeed);
         this.applyAudioEffects();
     }
@@ -301,35 +346,6 @@ export class Player {
             this.shuffleActive = savedState.shuffleActive || false;
             this.repeatMode = savedState.repeatMode !== undefined ? savedState.repeatMode : REPEAT_MODE.OFF;
 
-            // Fix offline tracks with dead blob URLs after a hard reload.
-            // Blob URLs don't survive page refreshes, so strip them and use
-            // the original TIDAL cover ID (stored in metadata) for display,
-            // then asynchronously re-hydrate from IndexedDB so playback works.
-            const fixDeadBlobUrls = (track) => {
-                if (!track?.isOffline) return;
-                // Strip dead blob: audio URL so playTrackFromQueue knows to re-fetch
-                if (track.audioUrl && track.audioUrl.startsWith('blob:')) {
-                    track.audioUrl = null;
-                }
-                // Strip dead blob: cover URL; fall back to original TIDAL cover ID
-                if (track.album?.cover && track.album.cover.startsWith('blob:')) {
-                    track.album.cover = track.album._originalCover || null;
-                }
-            };
-
-            this.queue.forEach(fixDeadBlobUrls);
-            this.shuffledQueue.forEach(fixDeadBlobUrls);
-            this.originalQueueBeforeShuffle.forEach(fixDeadBlobUrls);
-
-            // Pre-cache offline module so it's available during background playback (iOS)
-            // Dynamic import() can be blocked by iOS when the screen is locked
-            if (this.queue.some(t => t?.isOffline) || this.shuffledQueue.some(t => t?.isOffline)) {
-                import('./offline.js');
-            }
-
-            // Re-hydrate offline tracks from IndexedDB in the background
-            this._rehydrateOfflineTracks();
-
             // Restore current track if queue exists and index is valid
             const currentQueue = this.shuffleActive ? this.shuffledQueue : this.queue;
             if (this.currentQueueIndex >= 0 && this.currentQueueIndex < currentQueue.length) {
@@ -348,8 +364,9 @@ export class Player {
 
                 if (coverEl) {
                     const videoCoverUrl = track.videoUrl || track.videoCoverUrl || track.album?.videoCoverUrl || null;
-                    const coverUrl =
-                        videoCoverUrl || this.api.getCoverUrl(track.image || track.cover || track.album?.cover);
+                    const coverId = track.image || track.cover || track.album?.cover;
+                    const coverUrl = videoCoverUrl || this.api.getCoverUrl(coverId);
+                    const coverSrcset = videoCoverUrl ? null : this.api.getCoverSrcset(coverId);
 
                     if (videoCoverUrl) {
                         if (coverEl.tagName === 'IMG') {
@@ -367,14 +384,24 @@ export class Player {
                             coverEl.src = videoCoverUrl;
                         }
                     } else {
+                        const setImgSrcset = (img) => {
+                            if (img.getAttribute('src') !== coverUrl) img.src = coverUrl;
+                            if (coverSrcset) {
+                                img.setAttribute('srcset', coverSrcset);
+                                img.setAttribute('sizes', '(max-width: 640px) 160px, (max-width: 1024px) 320px, 640px');
+                            } else {
+                                img.removeAttribute('srcset');
+                                img.removeAttribute('sizes');
+                            }
+                        };
                         if (coverEl.tagName === 'VIDEO') {
                             const img = document.createElement('img');
-                            img.src = coverUrl;
                             img.className = coverEl.className;
                             img.id = coverEl.id;
+                            setImgSrcset(img);
                             coverEl.replaceWith(img);
                         } else {
-                            coverEl.src = coverUrl;
+                            setImgSrcset(coverEl);
                         }
                     }
                 }
@@ -413,64 +440,6 @@ export class Player {
         }
     }
 
-    /**
-     * Re-hydrate offline tracks in all queues from IndexedDB.
-     * Rebuilds blob URLs for audio and cover art so playback works after a hard reload.
-     */
-    async _rehydrateOfflineTracks() {
-        try {
-            const { getOfflineTrack, buildPlayableTrack } = await import('./offline.js');
-
-            const rehydrate = async (trackArray) => {
-                for (let i = 0; i < trackArray.length; i++) {
-                    const track = trackArray[i];
-                    if (!track?.isOffline) continue;
-                    // Only re-hydrate if the audioUrl is missing (was stripped as dead blob)
-                    if (track.audioUrl) continue;
-
-                    try {
-                        const entry = await getOfflineTrack(track.id);
-                        if (entry) {
-                            const playable = buildPlayableTrack(entry);
-                            // Preserve the original TIDAL cover ID for future reloads
-                            if (playable.album) {
-                                playable.album._originalCover = entry.metadata.albumCover || null;
-                            }
-                            trackArray[i] = playable;
-                        }
-                    } catch (e) {
-                        console.warn(`[Offline] Failed to re-hydrate track ${track.id}:`, e);
-                    }
-                }
-            };
-
-            await Promise.all([
-                rehydrate(this.queue),
-                rehydrate(this.shuffledQueue),
-                rehydrate(this.originalQueueBeforeShuffle),
-            ]);
-
-            // Update currentTrack reference after re-hydration
-            const currentQueue = this.shuffleActive ? this.shuffledQueue : this.queue;
-            if (this.currentQueueIndex >= 0 && this.currentQueueIndex < currentQueue.length) {
-                const rehydrated = currentQueue[this.currentQueueIndex];
-                if (rehydrated?.isOffline && rehydrated.audioUrl) {
-                    this.currentTrack = rehydrated;
-
-                    // Update cover art if it was re-hydrated with a fresh blob URL
-                    const coverEl = document.querySelector('.now-playing-bar .cover');
-                    if (coverEl && rehydrated.album?.cover) {
-                        if (coverEl.tagName === 'IMG') {
-                            coverEl.src = rehydrated.album.cover;
-                        }
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn('[Offline] Failed to re-hydrate offline tracks:', e);
-        }
-    }
-
     async saveQueueState() {
         queueManager.saveQueue({
             queue: this.queue,
@@ -487,10 +456,8 @@ export class Player {
     }
 
     async setupMediaSession() {
-        if (!('mediaSession' in navigator)) return;
-
         const setHandlers = async () => {
-            navigator.mediaSession.setActionHandler('play', async () => {
+            await MediaSession.setActionHandler({ action: 'play' }, async () => {
                 const el = this.activeElement;
                 // Initialize and resume audio context first (required for iOS lock screen)
                 // Must happen before audio.play() or audio won't route through Web Audio
@@ -509,11 +476,11 @@ export class Player {
                 }
             });
 
-            navigator.mediaSession.setActionHandler('pause', () => {
+            await MediaSession.setActionHandler({ action: 'pause' }, () => {
                 this.activeElement.pause();
             });
 
-            navigator.mediaSession.setActionHandler('previoustrack', async () => {
+            await MediaSession.setActionHandler({ action: 'previoustrack' }, async () => {
                 // Ensure audio context is active for iOS lock screen controls
                 if (!audioContextManager.isReady()) {
                     audioContextManager.init(this.activeElement);
@@ -523,7 +490,7 @@ export class Player {
                 this.playPrev();
             });
 
-            navigator.mediaSession.setActionHandler('nexttrack', async () => {
+            await MediaSession.setActionHandler({ action: 'nexttrack' }, async () => {
                 // Ensure audio context is active for iOS lock screen controls
                 if (!audioContextManager.isReady()) {
                     audioContextManager.init(this.activeElement);
@@ -534,24 +501,24 @@ export class Player {
             });
 
             if (!this.isIOS) {
-                navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+                await MediaSession.setActionHandler({ action: 'seekbackward' }, (details) => {
                     const skipTime = details.seekOffset || 10;
                     this.seekBackward(skipTime);
                 });
-                navigator.mediaSession.setActionHandler('seekforward', (details) => {
+                await MediaSession.setActionHandler({ action: 'seekforward' }, (details) => {
                     const skipTime = details.seekOffset || 10;
                     this.seekForward(skipTime);
                 });
             }
 
-            navigator.mediaSession.setActionHandler('seekto', (details) => {
+            await MediaSession.setActionHandler({ action: 'seekto' }, (details) => {
                 if (details.seekTime !== undefined) {
                     this.activeElement.currentTime = Math.max(0, details.seekTime);
                     this.updateMediaSessionPositionState();
                 }
             });
 
-            navigator.mediaSession.setActionHandler('stop', () => {
+            await MediaSession.setActionHandler({ action: 'stop' }, () => {
                 this.activeElement.pause();
                 this.activeElement.currentTime = 0;
                 this.updateMediaSessionPlaybackState();
@@ -574,7 +541,27 @@ export class Player {
         this.quality = quality;
     }
 
-    async preloadNextTracks() {
+    preloadNextTracks() {
+        this._pendingPreload = true;
+    }
+
+    async checkPreloadConditions() {
+        if (!this._pendingPreload || !this.activeElement || this.activeElement.paused) return;
+
+        const currentTime = this.activeElement.currentTime || 0;
+        const duration = this.activeElement.duration || 0;
+        const timeRemaining = duration - currentTime;
+
+        // Preload if we are in last 30 seconds of song
+        const shouldPreload = duration > 0 && timeRemaining <= 30;
+
+        if (shouldPreload) {
+            this._pendingPreload = false;
+            void this._executePreloadNextTracks().catch(console.error);
+        }
+    }
+
+    async _executePreloadNextTracks() {
         if (this.preloadAbortController) {
             this.preloadAbortController.abort();
         }
@@ -583,7 +570,8 @@ export class Player {
         const currentQueue = this.shuffleActive ? this.shuffledQueue : this.queue;
         const tracksToPreload = [];
 
-        for (let i = 1; i <= 2; i++) {
+        // Only preload the next 1 song to prevent data waste
+        for (let i = 1; i <= 1; i++) {
             const nextIndex = this.currentQueueIndex + i;
             if (nextIndex < currentQueue.length) {
                 tracksToPreload.push({ track: currentQueue[nextIndex], index: nextIndex });
@@ -603,86 +591,87 @@ export class Player {
 
                 if (this.preloadAbortController.signal.aborted) break;
 
+                // Also preload ReplayGain legacy metadata if the fast manifest endpoint failed to provide it
+                if (track.type !== 'video' && !streamInfo.rgInfo) {
+                    try {
+                        const trackData = await this.api.getTrack(track.id, this.quality);
+                        if (trackData && trackData.info) {
+                            streamInfo.rgInfoFallback = {
+                                trackReplayGain: trackData.info.trackReplayGain,
+                                trackPeakAmplitude: trackData.info.trackPeakAmplitude,
+                                albumReplayGain: trackData.info.albumReplayGain,
+                                albumPeakAmplitude: trackData.info.albumPeakAmplitude,
+                            };
+                        }
+                    } catch (_e) {} // Fail silently
+                }
+
                 this.preloadCache.set(track.id, streamInfo);
-                // Warm connection/cache
-                // For Blob URLs (DASH), this head request is not needed and can cause errors.
-                if (!streamInfo.url.startsWith('blob:')) {
-                    fetch(streamInfo.url, { method: 'HEAD', signal: this.preloadAbortController.signal }).catch(
-                        () => {}
-                    );
+                const streamUrl = streamInfo.url;
+
+                // Warm connection and pre-fetch
+                if (!streamUrl.startsWith('blob:')) {
+                    if (streamUrl.includes('.mpd') || streamUrl.includes('.m3u8')) {
+                        if (
+                            this.shakaInitialized &&
+                            this.shakaPlayer &&
+                            typeof this.shakaPlayer.preload === 'function'
+                        ) {
+                            try {
+                                let preloadConfig = undefined;
+                                if (typeof this.shakaPlayer.getConfiguration === 'function') {
+                                    preloadConfig = this.shakaPlayer.getConfiguration();
+                                    const stats =
+                                        typeof this.shakaPlayer.getStats === 'function'
+                                            ? this.shakaPlayer.getStats()
+                                            : null;
+                                    if (stats && stats.estimatedBandwidth) {
+                                        preloadConfig.abr.defaultBandwidthEstimate = stats.estimatedBandwidth;
+                                    }
+
+                                    // Lock the preload to the exact current audio codec to prevent ABR mismatch,
+                                    // which forces the player to discard and re-fetch chunks on slow connections.
+                                    preloadConfig.abr.enabled = false;
+                                    try {
+                                        const variants =
+                                            typeof this.shakaPlayer.getVariantTracks === 'function'
+                                                ? this.shakaPlayer.getVariantTracks()
+                                                : [];
+                                        const activeVariant = variants.find((v) => v.active);
+                                        if (activeVariant && activeVariant.audioCodec) {
+                                            preloadConfig.preferredAudioCodecs = [activeVariant.audioCodec];
+                                        }
+                                    } catch (_e) {}
+                                }
+                                const preloadManager = await this.shakaPlayer.preload(
+                                    streamUrl,
+                                    null,
+                                    null,
+                                    preloadConfig
+                                );
+                                streamInfo.preloadManager = preloadManager;
+                            } catch (_e) {
+                                // Ignore preload errors, will just load fresh
+                            }
+                        } else {
+                            fetch(streamUrl, { method: 'GET', signal: this.preloadAbortController.signal }).catch(
+                                () => {}
+                            );
+                        }
+                    } else {
+                        // For static files (FLAC, MP3), the audio element completely primes the cache.
+                        const preloader = new Audio();
+                        preloader.preload = 'auto';
+                        preloader.muted = true;
+                        preloader.src = streamUrl;
+                        streamInfo.preloader = preloader; // Hold reference
+                    }
                 }
             } catch (error) {
                 if (error.name !== 'AbortError') {
                     // console.debug('Failed to get stream URL for preload:', trackTitle);
                 }
             }
-        }
-
-        // iOS: also preload the immediate next track into a real audio element
-        // so background track transitions don't need network requests
-        if (this.isIOS) {
-            this._iosPreloadNextTrackElement();
-        }
-    }
-
-    /**
-     * iOS-specific: preload the next track into a hidden audio element.
-     * When the current track ends while the screen is locked, we can swap
-     * to this pre-buffered element instead of making network requests
-     * (which iOS suspends when backgrounded).
-     */
-    async _iosPreloadNextTrackElement() {
-        const currentQueue = this.shuffleActive ? this.shuffledQueue : this.queue;
-        const nextIndex = this.currentQueueIndex + 1;
-
-        if (nextIndex >= currentQueue.length) {
-            // No next track — check repeat all
-            if (this.repeatMode !== REPEAT_MODE.ALL || currentQueue.length === 0) return;
-        }
-
-        const effectiveNextIndex = nextIndex < currentQueue.length ? nextIndex : 0;
-        const nextTrack = currentQueue[effectiveNextIndex];
-        if (!nextTrack || nextTrack.isUnavailable) return;
-        if (nextTrack.type === 'video') return; // Video tracks can't use this optimization
-
-        // Already preloaded this track
-        if (this._iosPreloadedTrackId === nextTrack.id && this._iosPreloadedAudio) return;
-
-        try {
-            let streamUrl;
-            const isTracker = nextTrack.isTracker || (nextTrack.id && String(nextTrack.id).startsWith('tracker-'));
-
-            if (isTracker || (nextTrack.audioUrl && !nextTrack.isLocal)) {
-                streamUrl = nextTrack.audioUrl || nextTrack.remoteUrl;
-            } else if (nextTrack.isOffline && nextTrack.audioUrl) {
-                streamUrl = nextTrack.audioUrl;
-            } else if (nextTrack.isLocal) {
-                return; // Local files don't need preloading
-            } else if (this.preloadCache.has(nextTrack.id)) {
-                streamUrl = this.preloadCache.get(nextTrack.id);
-            } else {
-                // Need to fetch stream URL — do it now while we're in the foreground
-                streamUrl = await this.api.getStreamUrl(nextTrack.id, this.quality);
-                this.preloadCache.set(nextTrack.id, streamUrl);
-            }
-
-            if (!streamUrl || (streamUrl.startsWith('blob:') && !nextTrack.isOffline && !nextTrack.isLocal)) {
-                // DASH blob URLs can't be preloaded into a plain audio element
-                return;
-            }
-
-            // Create or reuse the preload element
-            if (!this._iosPreloadedAudio) {
-                this._iosPreloadedAudio = new Audio();
-                this._iosPreloadedAudio.preload = 'auto';
-                this._iosPreloadedAudio.crossOrigin = 'anonymous';
-            }
-            this._iosPreloadedAudio.src = streamUrl;
-            this._iosPreloadedTrackId = nextTrack.id;
-            this._iosPreloadedStreamUrl = streamUrl;
-            console.log(`[iOS Preload] Pre-buffering next track: ${nextTrack.title || nextTrack.id}`);
-        } catch (e) {
-            console.warn('[iOS Preload] Failed to preload next track element:', e);
         }
     }
 
@@ -817,6 +806,46 @@ export class Player {
         await this.playTrackFromQueue();
     }
 
+    async updateVideoCovers(videoUrl) {
+        if (!videoUrl) return;
+
+        const syncCover = async (el) => {
+            if (!el) return;
+            const isPaused = this.activeElement.paused;
+            let videoEl;
+            if (el.tagName === 'IMG') {
+                videoEl = document.createElement('video');
+                videoEl.autoplay = !isPaused;
+                videoEl.loop = true;
+                videoEl.muted = true;
+                videoEl.playsInline = true;
+                videoEl.className = el.className;
+                videoEl.id = el.id;
+                videoEl.style.objectFit = 'cover';
+                el.replaceWith(videoEl);
+            } else if (el.tagName === 'VIDEO') {
+                videoEl = el;
+            } else {
+                return;
+            }
+
+            if (UIRenderer.instance) {
+                await UIRenderer.instance.setupHlsVideo(videoEl, videoUrl, null);
+                if (isPaused) {
+                    videoEl.pause();
+                } else {
+                    videoEl.play().catch(() => {});
+                }
+            }
+        };
+
+        const playerBarCover = document.querySelector('.now-playing-bar .cover');
+        if (playerBarCover) await syncCover(playerBarCover);
+
+        const fullscreenCover = document.getElementById('fullscreen-cover-image');
+        if (fullscreenCover) await syncCover(fullscreenCover);
+    }
+
     async playTrackFromQueue(startTime = 0, recursiveCount = 0, isRetry = false) {
         if (!isRetry) {
             this.isFallbackRetry = false;
@@ -835,7 +864,8 @@ export class Player {
             return;
         }
 
-        // Check if track is blocked (using static import for iOS background compatibility)
+        // Check if track is blocked
+        const { contentBlockingSettings } = await import('./storage.js');
         if (contentBlockingSettings.shouldHideTrack(track)) {
             console.warn(`Attempted to play blocked track: ${track.title}. Skipping...`);
             await this.playNext();
@@ -872,10 +902,27 @@ export class Player {
         await this.saveQueueState();
 
         this.currentTrack = track;
-
+        this.addToRecentlyPlayed(track.id);
         const trackTitle = getTrackTitle(track);
+        const artistName = getTrackArtists(track);
         const trackArtistsHTML = getTrackArtistsHTML(track);
         const yearDisplay = getTrackYearDisplay(track);
+
+        if (!track.videoUrl && !track.videoCoverUrl && !track.album?.videoCoverUrl) {
+            this.api.getVideoArtwork(trackTitle, artistName).then((result) => {
+                if (this.currentTrack?.id === track.id && result && (result.videoUrl || result.hlsUrl)) {
+                    track.videoCoverUrl = result.videoUrl || result.hlsUrl;
+                    this.updateVideoCovers(track.videoCoverUrl);
+
+                    if (
+                        UIRenderer.instance &&
+                        document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex'
+                    ) {
+                        UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
+                    }
+                }
+            });
+        }
 
         const trackInfo = document.querySelector('.now-playing-bar .track-info');
         const coverEl = trackInfo?.querySelector('.cover:not(#audio-player):not(#video-player)');
@@ -887,9 +934,13 @@ export class Player {
             this.hls.destroy();
             this.hls = null;
         }
+
+        // Retain the initialized Shaka player if we are remaining on the same HTMLMediaElement
         if (this.shakaInitialized && this.shakaPlayer) {
-            this.shakaPlayer.unload();
-            this.shakaInitialized = false;
+            if (this.shakaPlayer.getMediaElement() !== activeElement) {
+                this.shakaPlayer.unload();
+                this.shakaInitialized = false;
+            }
         }
 
         if (inactiveElement) {
@@ -903,9 +954,13 @@ export class Player {
         }
 
         if (activeElement) {
-            activeElement.pause();
-            activeElement.src = '';
-            activeElement.removeAttribute('src');
+            // Let Shaka overwrite the activeElement's decoder pipeline gracefully if we're carrying it over.
+            // It manages its own buffering teardown implicitly when `load()` is executed.
+            if (!this.shakaInitialized) {
+                activeElement.pause();
+                activeElement.src = '';
+                activeElement.removeAttribute('src');
+            }
         }
 
         audioContextManager.changeSource(activeElement);
@@ -933,8 +988,33 @@ export class Player {
         } else {
             if (coverEl) {
                 coverEl.style.display = 'block';
-                const coverUrl = this.api.getCoverUrl(track.image || track.cover || track.album?.cover);
-                if (coverEl.src !== coverUrl) coverEl.src = coverUrl;
+                const videoCoverUrl = track.videoUrl || track.videoCoverUrl || track.album?.videoCoverUrl || null;
+                const coverId = track.image || track.cover || track.album?.cover;
+                const coverUrl = videoCoverUrl || this.api.getCoverUrl(coverId);
+                const coverSrcset = videoCoverUrl ? null : this.api.getCoverSrcset(coverId);
+
+                if (videoCoverUrl) {
+                    this.updateVideoCovers(videoCoverUrl);
+                } else {
+                    let imgEl = coverEl;
+                    if (coverEl.tagName === 'VIDEO') {
+                        imgEl = document.createElement('img');
+                        imgEl.className = coverEl.className;
+                        imgEl.id = coverEl.id;
+                        coverEl.replaceWith(imgEl);
+                    }
+
+                    if (imgEl.getAttribute('src') !== coverUrl) {
+                        imgEl.src = coverUrl;
+                        if (coverSrcset) {
+                            imgEl.setAttribute('srcset', coverSrcset);
+                            imgEl.setAttribute('sizes', '(max-width: 640px) 160px, (max-width: 1024px) 320px, 640px');
+                        } else {
+                            imgEl.removeAttribute('srcset');
+                            imgEl.removeAttribute('sizes');
+                        }
+                    }
+                }
             }
             if (this.audio) {
                 const isInFullscreen = document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex';
@@ -1050,53 +1130,6 @@ export class Player {
                     activeElement.currentTime = startTime;
                 }
                 const played = await this.safePlay(activeElement);
-            } else if (track.isOffline) {
-                // Re-hydrate from IndexedDB if the blob URL was lost (e.g. after hard reload)
-                if (!track.audioUrl) {
-                    try {
-                        const { getOfflineTrack, buildPlayableTrack } = await import('./offline.js');
-                        const entry = await getOfflineTrack(track.id);
-                        if (entry) {
-                            const playable = buildPlayableTrack(entry);
-                            if (playable.album) {
-                                playable.album._originalCover = entry.metadata.albumCover || null;
-                            }
-                            // Update the queue entry in-place
-                            Object.assign(track, playable);
-                            // Update cover in the now-playing bar
-                            const nowCover = document.querySelector('.now-playing-bar .cover');
-                            if (nowCover && nowCover.tagName === 'IMG' && track.album?.cover) {
-                                nowCover.src = track.album.cover;
-                            }
-                        }
-                    } catch (e) {
-                        console.warn('[Offline] Failed to re-hydrate for playback:', e);
-                    }
-                }
-
-                if (!track.audioUrl) {
-                    console.warn(`Offline track ${trackTitle} has no audio data. Skipping.`);
-                    track.isUnavailable = true;
-                    this.playNext();
-                    return;
-                }
-
-                streamUrl = track.audioUrl;
-                if (this.playbackSequence !== currentSequence) return;
-
-                this.currentRgValues = null;
-                this.applyReplayGain();
-
-                activeElement.src = streamUrl;
-                this.applyAudioEffects();
-
-                const canPlay = await this.waitForCanPlayOrTimeout(activeElement);
-                if (!canPlay || this.playbackSequence !== currentSequence) return;
-
-                if (startTime > 0) {
-                    activeElement.currentTime = startTime;
-                }
-                const played = await this.safePlay(activeElement);
                 if (!played) return;
             } else if (track.isLocal && track.file) {
                 streamUrl = URL.createObjectURL(track.file);
@@ -1139,7 +1172,20 @@ export class Player {
                     await this.setupHlsVideo(activeElement, streamUrl, null);
                 } else if (streamUrl.startsWith('blob:') || streamUrl.includes('.mpd')) {
                     await this.shakaPlayer.attach(activeElement);
-                    await this.shakaPlayer.load(streamUrl);
+
+                    const loadTarget =
+                        track.type == 'video' && this.preloadCache.has(track.id)
+                            ? this.preloadCache.get(track.id).preloadManager || streamUrl
+                            : streamUrl;
+
+                    try {
+                        await this.shakaPlayer.load(loadTarget);
+                    } catch (e) {
+                        console.error('PreloadManager load Error:', e);
+                        if (loadTarget !== streamUrl) await this.shakaPlayer.load(streamUrl);
+                        else throw e;
+                    }
+
                     this.shakaInitialized = true;
 
                     const savedAdaptiveQuality = localStorage.getItem('adaptive-playback-quality') || 'auto';
@@ -1152,28 +1198,16 @@ export class Player {
 
                 this.applyAudioEffects();
 
-                const canPlay = await this.waitForCanPlayOrTimeout(activeElement);
-                if (!canPlay || this.playbackSequence !== currentSequence) return;
-
                 if (startTime > 0) {
                     activeElement.currentTime = startTime;
                 }
 
                 await this.safePlay(activeElement);
             } else {
-                const isQobuz = String(track.id).startsWith('q:');
-                // iOS background optimization: if screen is locked and we have a preloaded
-                // stream URL, skip expensive API calls (ReplayGain is nice-to-have, not critical)
-                const isBackgrounded = this.isIOS && document.visibilityState === 'hidden';
-                const hasPreloadedUrl = this.preloadCache.has(track.id) ||
-                    (this._iosPreloadedTrackId === track.id && this._iosPreloadedStreamUrl);
-
                 // Tidal: Try to get ReplayGain from manifest first, supplement with track info if needed
                 const streamInfoPromise = this.preloadCache.has(track.id)
                     ? Promise.resolve(this.preloadCache.get(track.id))
-                    : (isBackgrounded && hasPreloadedUrl && this._iosPreloadedStreamUrl)
-                        ? Promise.resolve({ url: this._iosPreloadedStreamUrl })
-                        : this.api.getStreamUrl(track.id, this.quality);
+                    : this.api.getStreamUrl(track.id, this.quality);
 
                 // We only need the legacy track info if we missed getting ReplayGain from the manifest endpoint
                 const resolvedStreamInfo = await streamInfoPromise;
@@ -1184,18 +1218,9 @@ export class Player {
                 if (resolvedStreamInfo.rgInfo) {
                     this.currentRgValues = resolvedStreamInfo.rgInfo;
                     this.applyReplayGain();
-                } else if (isBackgrounded && hasPreloadedUrl) {
-                    // iOS backgrounded: skip getTrack API call, use cached stream URL directly
-                    // ReplayGain data will be applied when user returns to the app
-                    console.log('[iOS Background] Using preloaded stream URL, skipping getTrack API call');
-                    this.currentRgValues = null;
+                } else if (resolvedStreamInfo.rgInfoFallback) {
+                    this.currentRgValues = resolvedStreamInfo.rgInfoFallback;
                     this.applyReplayGain();
-
-                    if (this.preloadCache.has(track.id)) {
-                        streamUrl = this.preloadCache.get(track.id).url;
-                    } else {
-                        streamUrl = this._iosPreloadedStreamUrl;
-                    }
                 } else {
                     // Fallback to legacy metadata if manifest lacked normalization data
                     const trackData = await this.api.getTrack(track.id, this.quality).catch(() => null);
@@ -1219,12 +1244,25 @@ export class Player {
                 // Handle playback
                 if (streamUrl && (streamUrl.startsWith('blob:') || streamUrl.includes('.mpd')) && !track.isLocal) {
                     // It's likely a DASH manifest URL
-                    await this.shakaPlayer.attach(activeElement);
-                    if (startTime > 0) {
-                        await this.shakaPlayer.load(streamUrl, startTime);
-                    } else {
-                        await this.shakaPlayer.load(streamUrl);
+                    if (this.shakaPlayer.getMediaElement() !== activeElement) {
+                        await this.shakaPlayer.attach(activeElement);
+                        this.shakaInitialized = true;
                     }
+
+                    const loadTarget = resolvedStreamInfo.preloadManager || streamUrl;
+
+                    try {
+                        if (startTime > 0) {
+                            await this.shakaPlayer.load(loadTarget, startTime);
+                        } else {
+                            await this.shakaPlayer.load(loadTarget);
+                        }
+                    } catch (e) {
+                        console.error('PreloadManager load Error:', e);
+                        if (loadTarget !== streamUrl) await this.shakaPlayer.load(streamUrl);
+                        else throw e;
+                    }
+
                     this.shakaInitialized = true;
                     this.applyAudioEffects();
 
@@ -1233,27 +1271,20 @@ export class Player {
 
                     this.updateAdaptiveQualityBadge();
 
-                    const canPlay = await this.waitForCanPlayOrTimeout(activeElement);
-                    if (!canPlay || this.playbackSequence !== currentSequence) return;
+                    // Instantly trigger playback rather than explicitly waiting for 'canplay'
+                    // which delays the event loop and natively adds gap/latency
                     await this.safePlay(activeElement);
                 } else {
-                    // iOS: if we have a pre-buffered audio element for this track,
-                    // use its ready state instead of loading from scratch
-                    if (this.isIOS && this._iosPreloadedTrackId === track.id &&
-                        this._iosPreloadedAudio && this._iosPreloadedAudio.readyState >= 2) {
-                        console.log('[iOS Background] Using pre-buffered audio element');
-                        // The preloaded element is ready — set src on the main element
-                        // from the same URL (should be instant from browser cache)
-                        activeElement.src = this._iosPreloadedStreamUrl || streamUrl;
-                    } else {
-                        activeElement.src = streamUrl;
+                    if (this.shakaInitialized) {
+                        try {
+                            this.shakaPlayer.unload();
+                            this.shakaPlayer.detach();
+                        } catch {}
+                        this.shakaInitialized = false;
                     }
+                    activeElement.src = streamUrl;
                     this.applyAudioEffects();
                     this.updateAdaptiveQualityBadge();
-
-                    // Wait for audio to be ready before playing
-                    const canPlay = await this.waitForCanPlayOrTimeout(activeElement);
-                    if (!canPlay || this.playbackSequence !== currentSequence) return;
 
                     if (startTime > 0) {
                         activeElement.currentTime = startTime;
@@ -1263,16 +1294,7 @@ export class Player {
                 }
             }
 
-            // Clear the iOS preloaded element for the track we just started playing
-            if (this.isIOS && this._iosPreloadedTrackId === track.id) {
-                this._iosPreloadedTrackId = null;
-                this._iosPreloadedStreamUrl = null;
-                if (this._iosPreloadedAudio) {
-                    this._iosPreloadedAudio.src = '';
-                    this._iosPreloadedAudio.removeAttribute('src');
-                }
-            }
-            void this.preloadNextTracks().catch(console.error);
+            this.preloadNextTracks();
         } catch (error) {
             if (this.playbackSequence !== currentSequence) return;
             if (error && (error.name === 'NotAllowedError' || error.name === 'AbortError')) {
@@ -1300,10 +1322,6 @@ export class Player {
             }
 
             console.error(`Could not play track: ${trackTitle}`, error);
-            // Skip to next track on unexpected error
-            if (recursiveCount < currentQueue.length) {
-                setTimeout(() => this.playNext(recursiveCount + 1), 1000);
-            }
         }
     }
 
@@ -1329,6 +1347,15 @@ export class Player {
                 });
                 return;
             }
+            if (this.autoplayEnabled && isLastTrack) {
+                this.fetchAutoplayRecommendations().then(async () => {
+                    const updatedQueue = this.getCurrentQueue();
+                    if (this.currentQueueIndex < updatedQueue.length - 1) {
+                        await this.playNext(0);
+                    }
+                });
+                return;
+            }
             if (this.artistPopularTracksState.artistId && this.artistPopularTracksState.hasMore) {
                 await this.fetchMoreArtistPopularTracks().then(async (newTracks) => {
                     if (newTracks && newTracks.length > 0) {
@@ -1344,55 +1371,61 @@ export class Player {
             return;
         }
 
-        // Use statically imported contentBlockingSettings (no dynamic import)
-        // Dynamic import() is killed by iOS when the screen is locked,
-        // which prevents queue progression during background playback.
-        if (
-            this.repeatMode === REPEAT_MODE.ONE &&
-            !currentQueue[this.currentQueueIndex]?.isUnavailable &&
-            !contentBlockingSettings.shouldHideTrack(currentQueue[this.currentQueueIndex])
-        ) {
-            await this.playTrackFromQueue(0, recursiveCount);
-            return;
-        }
+        import('./storage.js')
+            .then(async ({ contentBlockingSettings }) => {
+                if (
+                    this.repeatMode === REPEAT_MODE.ONE &&
+                    !currentQueue[this.currentQueueIndex]?.isUnavailable &&
+                    !contentBlockingSettings.shouldHideTrack(currentQueue[this.currentQueueIndex])
+                ) {
+                    await this.playTrackFromQueue(0, recursiveCount);
+                    return;
+                }
 
-        if (!isLastTrack) {
-            this.currentQueueIndex++;
-            const track = currentQueue[this.currentQueueIndex];
-            // Skip unavailable and blocked tracks
-            if (track?.isUnavailable || contentBlockingSettings.shouldHideTrack(track)) {
-                return this.playNext(recursiveCount + 1);
-            }
-        } else if (this.radioEnabled) {
-            this.fetchRadioRecommendations().then(async () => {
-                const updatedQueue = this.getCurrentQueue();
-                if (this.currentQueueIndex < updatedQueue.length - 1) {
-                    await this.playNext(0);
+                if (!isLastTrack) {
+                    this.currentQueueIndex++;
+                    const track = currentQueue[this.currentQueueIndex];
+                    if (track?.isUnavailable || contentBlockingSettings.shouldHideTrack(track)) {
+                        return this.playNext(recursiveCount + 1);
+                    }
+                } else if (this.radioEnabled) {
+                    this.fetchRadioRecommendations().then(async () => {
+                        const updatedQueue = this.getCurrentQueue();
+                        if (this.currentQueueIndex < updatedQueue.length - 1) {
+                            await this.playNext(0);
+                        }
+                    });
+                    return;
+                } else if (this.autoplayEnabled) {
+                    this.fetchAutoplayRecommendations().then(async () => {
+                        const updatedQueue = this.getCurrentQueue();
+                        if (this.currentQueueIndex < updatedQueue.length - 1) {
+                            await this.playNext(0);
+                        }
+                    });
+                    return;
+                } else if (this.artistPopularTracksState.artistId && this.artistPopularTracksState.hasMore) {
+                    await this.fetchMoreArtistPopularTracks().then(async (newTracks) => {
+                        if (newTracks && newTracks.length > 0) {
+                            await this.addToQueue(newTracks);
+                        }
+                        this.currentQueueIndex++;
+                        await this.playTrackFromQueue(0, recursiveCount);
+                    });
+                    return;
+                } else if (this.repeatMode === REPEAT_MODE.ALL) {
+                    this.currentQueueIndex = 0;
+                    const track = currentQueue[this.currentQueueIndex];
+                    if (track?.isUnavailable || contentBlockingSettings.shouldHideTrack(track)) {
+                        return this.playNext(recursiveCount + 1);
+                    }
+                } else {
+                    return;
                 }
-            });
-            return;
-        } else if (this.artistPopularTracksState.artistId && this.artistPopularTracksState.hasMore) {
-            await this.fetchMoreArtistPopularTracks().then(async (newTracks) => {
-                if (newTracks && newTracks.length > 0) {
-                    await this.addToQueue(newTracks);
-                }
-                // Now play the next track (which is now at currentQueueIndex + 1 if tracks were added)
-                this.currentQueueIndex++;
+
                 await this.playTrackFromQueue(0, recursiveCount);
-            });
-            return;
-        } else if (this.repeatMode === REPEAT_MODE.ALL) {
-            this.currentQueueIndex = 0;
-            const track = currentQueue[this.currentQueueIndex];
-            // Skip unavailable and blocked tracks
-            if (track?.isUnavailable || contentBlockingSettings.shouldHideTrack(track)) {
-                return this.playNext(recursiveCount + 1);
-            }
-        } else {
-            return;
-        }
-
-        await this.playTrackFromQueue(0, recursiveCount);
+            })
+            .catch(console.error);
     }
 
     async enableRadio(seeds = []) {
@@ -1461,11 +1494,19 @@ export class Player {
                     ...favorites.map((t) => t.id),
                     ...userPlaylists.flatMap((p) => (p.tracks || []).map((t) => t.id)),
                     ...history.map((t) => t.id),
+                    ...this._recentlyPlayedIds,
                 ]);
 
-                const recommendations = await this.api.getRecommendedTracksForPlaylist(seeds, 20, {
+                let recommendations = await this.api.getRecommendedTracksForPlaylist(seeds, 20, {
                     knownTrackIds: knownTrackIds,
                 });
+
+                const { autoplaySettings: _autoplaySettings } = await import('./storage.js');
+                if (_autoplaySettings.isSmartRecsEnabled()) {
+                    const { smartRecommendations } = await import('./smart-recommendations.js');
+                    recommendations = smartRecommendations.filterRecommendations(recommendations);
+                    recommendations = smartRecommendations.rankRecommendations(recommendations);
+                }
 
                 if (recommendations && recommendations.length > 0) {
                     const currentQueueIds = new Set(this.getCurrentQueue().map((t) => t.id));
@@ -1492,6 +1533,14 @@ export class Player {
     }
 
     async pickRadioSeeds() {
+        try {
+            const { smartRecommendations } = await import('./smart-recommendations.js');
+            const smartSeeds = await smartRecommendations.getSmartSeeds(50);
+            if (smartSeeds.length > 0) return smartSeeds;
+        } catch (e) {
+            console.warn('Smart seeds failed, falling back to basic seed selection:', e);
+        }
+
         try {
             const [history, favorites, userPlaylists] = await Promise.all([
                 db.getHistory(),
@@ -1547,6 +1596,97 @@ export class Player {
         }
     }
 
+    enableAutoplay() {
+        this.autoplayEnabled = true;
+        autoplaySettings.setEnabled(true);
+    }
+
+    disableAutoplay() {
+        this.autoplayEnabled = false;
+        autoplaySettings.setEnabled(false);
+    }
+
+    addToRecentlyPlayed(trackId) {
+        if (!trackId) return;
+        this._recentlyPlayedIds = this._recentlyPlayedIds.filter((id) => id !== trackId);
+        this._recentlyPlayedIds.push(trackId);
+        if (this._recentlyPlayedIds.length > this._maxRecentlyPlayed) {
+            this._recentlyPlayedIds = this._recentlyPlayedIds.slice(-this._maxRecentlyPlayed);
+        }
+    }
+
+    fetchAutoplayRecommendations() {
+        if (this.isFetchingAutoplay) return this.autoplayFetchPromise || Promise.resolve();
+        this.isFetchingAutoplay = true;
+
+        this.showRadioLoading(true);
+
+        this.autoplayFetchPromise = (async () => {
+            try {
+                const { smartRecommendations } = await import('./smart-recommendations.js');
+                const { autoplaySettings: _autoplaySettings } = await import('./storage.js');
+
+                const currentQueue = this.getCurrentQueue();
+                const recentQueueTracks = currentQueue.slice(
+                    Math.max(0, this.currentQueueIndex - 10),
+                    this.currentQueueIndex + 1
+                );
+
+                const seeds = await smartRecommendations.getAdaptiveQueueSeeds(
+                    recentQueueTracks,
+                    this._recentlyPlayedIds,
+                    5
+                );
+
+                if (seeds.length === 0) {
+                    if (this.currentTrack) seeds.push(this.currentTrack);
+                    else return;
+                }
+
+                const [favorites, userPlaylists, history] = await Promise.all([
+                    db.getFavorites('track'),
+                    db.getAll('user_playlists'),
+                    db.getHistory(),
+                ]);
+
+                const knownTrackIds = new Set([
+                    ...favorites.map((t) => t.id),
+                    ...userPlaylists.flatMap((p) => (p.tracks || []).map((t) => t.id)),
+                    ...history.map((t) => t.id),
+                    ...this._recentlyPlayedIds,
+                    ...currentQueue.map((t) => t.id),
+                ]);
+
+                let recommendations = await this.api.getRecommendedTracksForPlaylist(seeds, 20, {
+                    knownTrackIds: knownTrackIds,
+                });
+
+                if (_autoplaySettings.isSmartRecsEnabled()) {
+                    recommendations = smartRecommendations.filterRecommendations(recommendations);
+                    recommendations = smartRecommendations.rankRecommendations(recommendations);
+                }
+
+                if (recommendations && recommendations.length > 0) {
+                    const currentQueueIds = new Set(currentQueue.map((t) => t.id));
+                    let newTracks = recommendations.filter((t) => !currentQueueIds.has(t.id));
+
+                    if (newTracks.length > 0) {
+                        const tracksToAdd = newTracks.slice(0, 5);
+                        await this.addToQueue(tracksToAdd);
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to fetch autoplay recommendations:', error);
+            } finally {
+                this.isFetchingAutoplay = false;
+                this.autoplayFetchPromise = null;
+                setTimeout(() => this.showRadioLoading(false), 500);
+            }
+        })();
+
+        return this.autoplayFetchPromise;
+    }
+
     playPrev(recursiveCount = 0) {
         const el = this.activeElement;
         if (el.currentTime > 3) {
@@ -1554,7 +1694,6 @@ export class Player {
             this.updateMediaSessionPositionState();
         } else if (this.currentQueueIndex > 0) {
             this.currentQueueIndex--;
-            // Skip unavailable and blocked tracks
             const currentQueue = this.shuffleActive ? this.shuffledQueue : this.queue;
 
             if (recursiveCount > currentQueue.length) {
@@ -1569,6 +1708,12 @@ export class Player {
                     if (track?.isUnavailable || contentBlockingSettings.shouldHideTrack(track)) {
                         return this.playPrev(recursiveCount + 1);
                     }
+                    import('./listening-tracker.js')
+                        .then(({ listeningTracker }) => {
+                            listeningTracker.onSkip();
+                            listeningTracker.forceFlush();
+                        })
+                        .catch(() => {});
                     await this.playTrackFromQueue(0, recursiveCount);
                 })
                 .catch(console.error);
@@ -1650,7 +1795,7 @@ export class Player {
         }
 
         this.preloadCache.clear();
-        void this.preloadNextTracks().catch(console.error);
+        this.preloadNextTracks();
         await this.saveQueueState();
     }
 
@@ -1766,7 +1911,7 @@ export class Player {
         }
 
         await this.saveQueueState();
-        void this.preloadNextTracks().catch(console.error); // Update preload since next track changed
+        this.preloadNextTracks(); // Update preload since next track changed
     }
 
     async removeFromQueue(index) {
@@ -1794,7 +1939,7 @@ export class Player {
         }
 
         await this.saveQueueState();
-        void this.preloadNextTracks().catch(console.error);
+        this.preloadNextTracks();
     }
 
     async clearQueue() {
@@ -1970,9 +2115,29 @@ export class Player {
                     }
 
                     if (isAtmosPlaying) {
+                        // Auto-enable binaural DSP for spatial content
+                        if (binauralDspSettings.getAutoEnableForSpatial() && !binauralDspSettings.isEnabled()) {
+                            void audioContextManager.toggleBinaural(true);
+                            // Update toggle in settings UI if visible
+                            const toggle = document.getElementById('binaural-dsp-toggle');
+                            if (toggle) toggle.checked = true;
+                            const container = document.getElementById('binaural-dsp-container');
+                            if (container) container.style.display = 'block';
+                        }
+                        // Notify binaural DSP of the actual multichannel layout when Shaka exposes it.
+                        const atmosChannelCount =
+                            Number.isFinite(activeVariant.channelsCount) && activeVariant.channelsCount > 0
+                                ? activeVariant.channelsCount
+                                : 6;
+                        void audioContextManager.notifyBinauralChannelCount(atmosChannelCount);
+
+                        const binauralActive = audioContextManager.isBinauralActive();
                         badgeEl.className = 'quality-badge quality-atmos shaka-quality-badge';
-                        badgeEl.innerHTML = SVG_ATMOS(20);
+                        badgeEl.innerHTML =
+                            SVG_ATMOS(20) + (binauralActive ? ' <span class="binaural-badge">Binaural</span>' : '');
                     } else {
+                        // Notify binaural DSP that we're in stereo mode
+                        void audioContextManager.notifyBinauralChannelCount(2);
                         badgeEl.className = 'quality-badge quality-hires shaka-quality-badge';
                         badgeEl.textContent = text;
                     }
@@ -2158,42 +2323,73 @@ export class Player {
     }
 
     updateMediaSession(track) {
-        if (!('mediaSession' in navigator)) return;
-
-        // Force a refresh for picky Bluetooth systems by clearing metadata first
-        navigator.mediaSession.metadata = null;
-
         const coverId = track.album?.cover;
         const trackTitle = getTrackTitle(track);
 
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: trackTitle || 'Unknown Title',
-            artist: getTrackArtists(track) || 'Unknown Artist',
-            album: track.album?.title || 'Unknown Album',
-            artwork: coverId
-                ? [
-                      {
-                          src: this.api.getCoverUrl(coverId, '1280'),
-                          sizes: '1280x1280',
-                          type: 'image/jpeg',
-                      },
-                  ]
-                : undefined,
-        });
-
-        this.updateMediaSessionPlaybackState();
-        this.updateMediaSessionPositionState();
+        // Force a refresh for picky Bluetooth systems by clearing metadata first
+        MediaSession.setMetadata({})
+            .finally(() =>
+                MediaSession.setMetadata({
+                    title: trackTitle || 'Unknown Title',
+                    artist: getTrackArtists(track) || 'Unknown Artist',
+                    album: track.album?.title || 'Unknown Album',
+                    artwork: coverId
+                        ? [
+                              {
+                                  src: this.api.getCoverUrl(coverId, '1280'),
+                                  sizes: '1280x1280',
+                                  type: 'image/jpeg',
+                              },
+                          ]
+                        : undefined,
+                })
+            )
+            .catch(() => {})
+            .finally(() => {
+                this.updateMediaSessionPlaybackState();
+                this.updateMediaSessionPositionState();
+            });
     }
 
     updateMediaSessionPlaybackState() {
-        if (!('mediaSession' in navigator)) return;
-        navigator.mediaSession.playbackState = this.activeElement.paused ? 'paused' : 'playing';
+        const isPlaying = !this.activeElement.paused;
+        void MediaSession.setPlaybackState({ playbackState: isPlaying ? 'playing' : 'paused' });
+
+        // Start/stop Android foreground service to prevent background audio throttling
+        this._updateBackgroundAudioService(isPlaying);
+    }
+
+    /**
+     * On Android (Capacitor), start or stop the foreground service that keeps
+     * the WebView alive so Web Audio EQ processing isn't throttled.
+     */
+    _updateBackgroundAudioService(isPlaying) {
+        if (this._bgAudioPending) return;
+        this._bgAudioPending = true;
+
+        // Lazy-load Capacitor core; no-op on web/iOS
+        void (async () => {
+            try {
+                const { Capacitor } = await import('@capacitor/core');
+                if (Capacitor.getPlatform() !== 'android') return;
+                const { registerPlugin } = await import('@capacitor/core');
+                if (!this._bgAudioPlugin) {
+                    this._bgAudioPlugin = registerPlugin('BackgroundAudio');
+                }
+                if (isPlaying) {
+                    await this._bgAudioPlugin.start();
+                } else {
+                    await this._bgAudioPlugin.stop();
+                }
+            } catch {
+                // Not running in Capacitor or plugin unavailable - ignore
+            } finally {
+                this._bgAudioPending = false;
+            }
+        })();
     }
 
     updateMediaSessionPositionState() {
-        if (!('mediaSession' in navigator)) return;
-        if (!('setPositionState' in navigator.mediaSession)) return;
-
         const el = this.activeElement;
         const duration = el.duration;
 
@@ -2201,15 +2397,13 @@ export class Player {
             return;
         }
 
-        try {
-            navigator.mediaSession.setPositionState({
-                duration: duration,
-                playbackRate: el.playbackRate || 1,
-                position: Math.min(el.currentTime, duration),
-            });
-        } catch (error) {
+        MediaSession.setPositionState({
+            duration: duration,
+            playbackRate: el.playbackRate || 1,
+            position: Math.min(el.currentTime, duration),
+        }).catch((error) => {
             console.log('Failed to update Media Session position:', error);
-        }
+        });
     }
 
     async safePlay(element = this.activeElement) {
@@ -2246,33 +2440,16 @@ export class Player {
             element.addEventListener('error', onError);
 
             // Timeout after 10 seconds. Treat as autoplay blocked when backgrounded (esp. iOS PWA).
-            // Use shorter timeout for blob URLs (offline tracks from IndexedDB load near-instantly)
-            const src = element.src || '';
-            const effectiveTimeout = src.startsWith('blob:') ? 3000 : timeoutMs;
             setTimeout(() => {
                 element.removeEventListener('canplay', onCanPlay);
                 element.removeEventListener('error', onError);
                 if (document.visibilityState === 'hidden' || (this.isIOS && this.isPwa)) {
-                    // For offline blob URLs, try playing anyway — data is local, not network
-                    if (src.startsWith('blob:')) {
-                        resolve(true);
-                        return;
-                    }
-                    // iOS: if readyState has progressed at all, try playing anyway.
-                    // iOS may partially load without firing canplay.  Also try if
-                    // the element has HAVE_METADATA (readyState 1) since the audio
-                    // pipeline may still be able to start playback and buffer.
-                    if (this.isIOS && element.readyState >= 1) {
-                        console.log('[iOS Background] Timeout but readyState is', element.readyState, '— trying play anyway');
-                        resolve(true);
-                        return;
-                    }
                     this.autoplayBlocked = true;
                     resolve(false);
                     return;
                 }
                 reject(new Error('Timeout waiting for audio to load'));
-            }, effectiveTimeout);
+            }, timeoutMs);
         });
     }
 

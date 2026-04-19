@@ -8,6 +8,7 @@ import {
     backgroundSettings,
     dynamicColorSettings,
     cardSettings,
+    artistBannerSettings,
     waveformSettings,
     replayGainSettings,
     downloadQualitySettings,
@@ -35,10 +36,13 @@ import {
     analyticsSettings,
     modalSettings,
     preferDolbyAtmosSettings,
+    binauralDspSettings,
     fullscreenCoverNoRoundSettings,
     fullscreenCoverVanillaTiltSettings,
     fullscreenCoverTiltDistanceSettings,
     fullscreenCoverTiltSpeedSettings,
+    devModeSettings,
+    serverDisruptionSettings,
 } from './storage.js';
 import { audioContextManager, getPresetsForBandCount } from './audio-context.js';
 import { calculateBiquadResponse, interpolate, getNormalizationOffset, runAutoEqAlgorithm } from './autoeq-engine.js';
@@ -57,6 +61,8 @@ async function getButterchurnPresets(...args) {
 
 // Module-level state for AutoEQ (persists across re-initializations)
 let _autoeqIndex = [];
+let _graphAbortController = null;
+let _graphResizeObserver = null;
 
 export async function initializeSettings(scrobbler, player, api, ui) {
     // Restore last active settings tab
@@ -71,6 +77,51 @@ export async function initializeSettings(scrobbler, player, api, ui) {
 
     // Initialize account system UI & Settings
     authManager.updateUI(authManager.user);
+
+    // ========================================
+    // Dev Mode
+    // ========================================
+    const devModeToggle = document.getElementById('dev-mode-toggle');
+    const devModeUrlSetting = document.getElementById('dev-mode-url-setting');
+    const devModeUrlInput = document.getElementById('dev-mode-url-input');
+
+    function updateDevModeUI() {
+        if (devModeToggle) devModeToggle.checked = devModeSettings.isEnabled();
+        if (devModeUrlSetting) devModeUrlSetting.style.display = devModeSettings.isEnabled() ? '' : 'none';
+        if (devModeUrlInput) devModeUrlInput.value = devModeSettings.getUrl();
+    }
+
+    updateDevModeUI();
+
+    if (devModeToggle) {
+        devModeToggle.addEventListener('change', (e) => {
+            devModeSettings.setEnabled(e.target.checked);
+            updateDevModeUI();
+        });
+    }
+
+    if (devModeUrlInput) {
+        devModeUrlInput.addEventListener('change', (e) => {
+            devModeSettings.setUrl(e.target.value.trim());
+        });
+    }
+
+    // ========================================
+    // Server Disruption Banner
+    // ========================================
+    const disruptionBanner = document.getElementById('server-disruption-banner');
+    const dismissDisruptionBtn = document.getElementById('dismiss-disruption-btn');
+
+    if (disruptionBanner && !serverDisruptionSettings.isDismissed()) {
+        disruptionBanner.style.display = 'flex';
+    }
+
+    if (dismissDisruptionBtn) {
+        dismissDisruptionBtn.addEventListener('click', () => {
+            serverDisruptionSettings.dismiss();
+            if (disruptionBanner) disruptionBanner.style.display = 'none';
+        });
+    }
 
     // Email Auth UI Logic
     const toggleEmailBtn = document.getElementById('toggle-email-auth-btn');
@@ -802,7 +853,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
 
         // Apply initially
         if (player.forceQuality) player.forceQuality(streamingQualitySetting.value);
-        const apiQuality = streamingQualitySetting.value === 'auto' ? 'HI_RES_LOSSLESS' : streamingQualitySetting.value;
+        const apiQuality = streamingQualitySetting.value === 'auto' ? 'LOSSLESS' : streamingQualitySetting.value;
         player.setQuality(localStorage.getItem('playback-quality') || apiQuality);
 
         streamingQualitySetting.addEventListener('change', (e) => {
@@ -813,7 +864,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             if (player.forceQuality) player.forceQuality(val);
 
             // Set fallback API quality
-            const newApiQuality = val === 'auto' ? 'HI_RES_LOSSLESS' : val;
+            const newApiQuality = val === 'auto' ? 'LOSSLESS' : val;
             player.setQuality(newApiQuality);
             localStorage.setItem('playback-quality', newApiQuality);
         });
@@ -1135,7 +1186,8 @@ export async function initializeSettings(scrobbler, player, api, ui) {
     if (replayGainPreamp) {
         replayGainPreamp.value = replayGainSettings.getPreamp();
         replayGainPreamp.addEventListener('change', (e) => {
-            replayGainSettings.setPreamp(parseFloat(e.target.value) || 3);
+            const val = parseFloat(e.target.value);
+            replayGainSettings.setPreamp(isNaN(val) ? 3 : val);
             player.applyReplayGain();
         });
     }
@@ -1150,6 +1202,107 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             audioContextManager.toggleMonoAudio(enabled);
         });
     }
+
+    // ========================================
+    // Binaural / Spatial DSP
+    // ========================================
+    const binauralToggle = document.getElementById('binaural-dsp-toggle');
+    const binauralContainer = document.getElementById('binaural-dsp-container');
+    const binauralAutoSpatialToggle = document.getElementById('binaural-auto-spatial-toggle');
+    const binauralCrossfeedToggle = document.getElementById('binaural-crossfeed-toggle');
+    const binauralCrossfeedLevel = document.getElementById('binaural-crossfeed-level');
+    const crossfeedLevelRow = document.getElementById('crossfeed-level-row');
+    const binauralHrtfPreset = document.getElementById('binaural-hrtf-preset');
+    const binauralWideningToggle = document.getElementById('binaural-widening-toggle');
+    const binauralWideningSlider = document.getElementById('binaural-widening-slider');
+    const binauralWidthValue = document.getElementById('binaural-width-value');
+    const wideningSliderRow = document.getElementById('widening-slider-row');
+
+    if (binauralToggle && binauralContainer) {
+        const isEnabled = binauralDspSettings.isEnabled();
+        binauralToggle.checked = isEnabled;
+        binauralContainer.style.display = isEnabled ? 'block' : 'none';
+
+        binauralToggle.addEventListener('change', async (e) => {
+            const enabled = e.target.checked;
+            binauralContainer.style.display = enabled ? 'block' : 'none';
+            await audioContextManager.toggleBinaural(enabled);
+        });
+    }
+
+    if (binauralAutoSpatialToggle) {
+        binauralAutoSpatialToggle.checked = binauralDspSettings.getAutoEnableForSpatial();
+        binauralAutoSpatialToggle.addEventListener('change', (e) => {
+            binauralDspSettings.setAutoEnableForSpatial(e.target.checked);
+        });
+    }
+
+    if (binauralCrossfeedToggle) {
+        binauralCrossfeedToggle.checked = binauralDspSettings.getCrossfeedEnabled();
+        if (crossfeedLevelRow) {
+            crossfeedLevelRow.style.display = binauralCrossfeedToggle.checked ? 'flex' : 'none';
+        }
+        binauralCrossfeedToggle.addEventListener('change', async (e) => {
+            const enabled = e.target.checked;
+            if (crossfeedLevelRow) {
+                crossfeedLevelRow.style.display = enabled ? 'flex' : 'none';
+            }
+            await audioContextManager.setBinauralCrossfeedEnabled(enabled);
+        });
+    }
+
+    if (binauralCrossfeedLevel) {
+        binauralCrossfeedLevel.value = binauralDspSettings.getCrossfeedLevel();
+        binauralCrossfeedLevel.addEventListener('change', (e) => {
+            audioContextManager.setBinauralCrossfeedLevel(e.target.value);
+        });
+    }
+
+    if (binauralHrtfPreset) {
+        binauralHrtfPreset.value = binauralDspSettings.getHrtfPreset();
+        binauralHrtfPreset.addEventListener('change', async (e) => {
+            await audioContextManager.setBinauralHrtfPreset(e.target.value);
+        });
+    }
+
+    if (binauralWideningToggle) {
+        binauralWideningToggle.checked = binauralDspSettings.getWideningEnabled();
+        if (wideningSliderRow) {
+            wideningSliderRow.style.display = binauralWideningToggle.checked ? 'flex' : 'none';
+        }
+        binauralWideningToggle.addEventListener('change', async (e) => {
+            const enabled = e.target.checked;
+            if (wideningSliderRow) {
+                wideningSliderRow.style.display = enabled ? 'flex' : 'none';
+            }
+            await audioContextManager.setBinauralWideningEnabled(enabled);
+        });
+    }
+
+    if (binauralWideningSlider && binauralWidthValue) {
+        binauralWideningSlider.value = binauralDspSettings.getWideningAmount();
+        binauralWidthValue.textContent = parseFloat(binauralWideningSlider.value).toFixed(2);
+        binauralWideningSlider.addEventListener('input', (e) => {
+            const amount = parseFloat(e.target.value);
+            binauralWidthValue.textContent = amount.toFixed(2);
+            audioContextManager.setBinauralWidening(amount);
+        });
+    }
+
+    // Listen for binaural mode changes (multichannel detection)
+    window.addEventListener('binaural-mode-changed', (e) => {
+        const statusEl = document.getElementById('binaural-status');
+        if (statusEl) {
+            const { mode, channels } = e.detail;
+            const label = statusEl.querySelector('.binaural-mode-label');
+            if (label) {
+                label.textContent =
+                    mode === 'multichannel'
+                        ? `Mode: Multichannel (${channels > 6 ? '7.1' : '5.1'} → Binaural)`
+                        : 'Mode: Stereo';
+            }
+        }
+    });
 
     // Exponential Volume Toggle
     const exponentialVolumeToggle = document.getElementById('exponential-volume-toggle');
@@ -1172,7 +1325,8 @@ export async function initializeSettings(scrobbler, player, api, ui) {
     if (playbackSpeedSlider && playbackSpeedInput) {
         // Helper function to update both controls
         const updatePlaybackSpeedControls = (speed) => {
-            const validSpeed = Math.max(0.01, Math.min(100, parseFloat(speed) || 1.0));
+            const parsedSpeed = parseFloat(speed);
+            const validSpeed = Math.max(0.01, Math.min(100, isNaN(parsedSpeed) ? 1.0 : parsedSpeed));
             playbackSpeedInput.value = validSpeed;
             // Only update slider if value is within slider range
             if (validSpeed >= 0.25 && validSpeed <= 4.0) {
@@ -1232,6 +1386,508 @@ export async function initializeSettings(scrobbler, player, api, ui) {
     }
 
     // ========================================
+    // Graphic Equalizer (Legacy EQ mode) - Configurable Bands
+    // ========================================
+    let geqBandCount = equalizerSettings.getGraphicEqBandCount();
+    let geqFreqRange = equalizerSettings.getGraphicEqFreqRange();
+
+    const formatGeqFreq = (freq) => {
+        if (freq >= 10000) return (freq / 1000).toFixed(0) + 'K';
+        if (freq >= 1000) return (freq / 1000).toFixed(freq % 1000 === 0 ? 0 : 1) + 'K';
+        return freq.toString();
+    };
+
+    const generateGeqFrequencies = (count, min, max) => {
+        const freqs = [];
+        for (let i = 0; i < count; i++) {
+            const t = i / (count - 1);
+            let freq = Math.round(min * Math.pow(max / min, t));
+            // Ensure strictly increasing - rounding can produce duplicates at high band counts
+            if (freqs.length > 0 && freq <= freqs[freqs.length - 1]) {
+                freq = freqs[freqs.length - 1] + 1;
+            }
+            freqs.push(freq);
+        }
+        return freqs;
+    };
+
+    let GEQ_FREQUENCIES = generateGeqFrequencies(geqBandCount, geqFreqRange.min, geqFreqRange.max);
+    let GEQ_LABELS = GEQ_FREQUENCIES.map(formatGeqFreq);
+
+    const geqBandsContainer = document.getElementById('graphic-eq-bands');
+    const geqPreampSlider = document.getElementById('graphic-eq-preamp-slider');
+    const geqPreampValue = document.getElementById('graphic-eq-preamp-value');
+    const geqPresetSelect = document.getElementById('graphic-eq-preset-select');
+    const geqResetBtn = document.getElementById('graphic-eq-reset-btn');
+
+    const legacyGeqBandsContainer = document.getElementById('legacy-graphic-eq-bands');
+    const legacyGeqPreampSlider = document.getElementById('legacy-graphic-eq-preamp-slider');
+    const legacyGeqPreampValue = document.getElementById('legacy-graphic-eq-preamp-value');
+    const legacyGeqPresetSelect = document.getElementById('legacy-graphic-eq-preset-select');
+    const legacyGeqResetBtn = document.getElementById('legacy-graphic-eq-reset-btn');
+
+    const geqBandCountInput = document.getElementById('legacy-geq-band-count');
+    const geqFreqMinInput = document.getElementById('legacy-geq-freq-min');
+    const geqFreqMaxInput = document.getElementById('legacy-geq-freq-max');
+
+    const geqPreampSliders = [geqPreampSlider, legacyGeqPreampSlider].filter(Boolean);
+    const geqPreampValues = [geqPreampValue, legacyGeqPreampValue].filter(Boolean);
+    const geqPresetSelects = [geqPresetSelect, legacyGeqPresetSelect].filter(Boolean);
+
+    let geqGains = equalizerSettings.getGraphicEqGains(geqBandCount) || new Array(geqBandCount).fill(0);
+    let geqPreamp = equalizerSettings.getGraphicEqPreamp() || 0;
+    const geqRange = equalizerSettings.getRange();
+
+    // Sync all slider UIs across both containers
+    const geqSyncAllSliders = () => {
+        geqGains.forEach((g, i) => {
+            ['geq', 'legacy-geq'].forEach((prefix) => {
+                const sl = document.getElementById(`${prefix}-slider-${i}`);
+                const vl = document.getElementById(`${prefix}-value-${i}`);
+                if (sl) sl.value = g;
+                if (vl) vl.textContent = `${g > 0 ? '+' : ''}${g.toFixed(1)}`;
+            });
+        });
+    };
+
+    // Build vertical slider bands into a container
+    const buildGeqBands = (container, idPrefix) => {
+        if (!container) return;
+        container.innerHTML = '';
+        GEQ_LABELS.forEach((_label, i) => {
+            const band = document.createElement('div');
+            band.className = 'graphic-eq-band';
+
+            const valueLabel = document.createElement('span');
+            valueLabel.className = 'graphic-eq-band-value';
+            valueLabel.textContent = `${geqGains[i] > 0 ? '+' : ''}${geqGains[i].toFixed(1)}`;
+            valueLabel.id = `${idPrefix}-value-${i}`;
+
+            const sliderWrap = document.createElement('div');
+            sliderWrap.className = 'graphic-eq-band-slider-wrap';
+
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = geqRange.min;
+            slider.max = geqRange.max;
+            slider.step = '0.1';
+            slider.value = geqGains[i];
+            slider.id = `${idPrefix}-slider-${i}`;
+            slider.setAttribute('aria-label', `${GEQ_LABELS[i]} Hz`);
+
+            slider.addEventListener('input', () => {
+                const gain = parseFloat(slider.value);
+                geqGains[i] = gain;
+                equalizerSettings.setGraphicEqGains(geqGains);
+                audioContextManager.setGraphicEqBandGain(i, gain);
+                geqSyncAllSliders();
+                geqPresetSelects.forEach((s) => (s.value = ''));
+            });
+
+            sliderWrap.appendChild(slider);
+
+            const freqLabel = document.createElement('span');
+            freqLabel.className = 'graphic-eq-band-label';
+            freqLabel.textContent = GEQ_LABELS[i];
+
+            band.appendChild(valueLabel);
+            band.appendChild(sliderWrap);
+            band.appendChild(freqLabel);
+            container.appendChild(band);
+        });
+    };
+
+    buildGeqBands(geqBandsContainer, 'geq');
+    buildGeqBands(legacyGeqBandsContainer, 'legacy-geq');
+
+    // Wire up preamp sliders
+    geqPreampSliders.forEach((slider) => {
+        slider.value = geqPreamp;
+        slider.addEventListener('input', () => {
+            geqPreamp = parseFloat(slider.value);
+            const text = `${geqPreamp.toFixed(1)} dB`;
+            geqPreampValues.forEach((v) => (v.textContent = text));
+            geqPreampSliders.forEach((s) => {
+                if (s !== slider) s.value = geqPreamp;
+            });
+            equalizerSettings.setGraphicEqPreamp(geqPreamp);
+            audioContextManager.setGraphicEqPreamp(geqPreamp);
+        });
+    });
+    geqPreampValues.forEach((v) => (v.textContent = `${geqPreamp} dB`));
+
+    // Wire up preset selects
+    geqPresetSelects.forEach((select) => {
+        select.addEventListener('change', () => {
+            const key = select.value;
+            if (!key) return;
+            const presets = getPresetsForBandCount(geqBandCount);
+            const preset = presets[key];
+            if (!preset) return;
+            geqGains = [...preset.gains];
+            equalizerSettings.setGraphicEqGains(geqGains);
+            audioContextManager.setGraphicEqAllGains(geqGains);
+            geqSyncAllSliders();
+            geqPresetSelects.forEach((s) => {
+                if (s !== select) s.value = key;
+            });
+        });
+    });
+
+    // Wire up reset buttons
+    [geqResetBtn, legacyGeqResetBtn].filter(Boolean).forEach((btn) => {
+        btn.addEventListener('click', () => {
+            geqGains = new Array(geqBandCount).fill(0);
+            equalizerSettings.setGraphicEqGains(geqGains);
+            audioContextManager.setGraphicEqAllGains(geqGains);
+            geqSyncAllSliders();
+            geqPresetSelects.forEach((s) => (s.value = 'flat'));
+        });
+    });
+
+    // Band count and frequency range controls
+    const rebuildGeq = () => {
+        GEQ_FREQUENCIES = generateGeqFrequencies(geqBandCount, geqFreqRange.min, geqFreqRange.max);
+        GEQ_LABELS = GEQ_FREQUENCIES.map(formatGeqFreq);
+        buildGeqBands(geqBandsContainer, 'geq');
+        buildGeqBands(legacyGeqBandsContainer, 'legacy-geq');
+        geqSyncAllSliders();
+    };
+
+    if (geqBandCountInput) {
+        geqBandCountInput.value = geqBandCount;
+        geqBandCountInput.addEventListener('change', () => {
+            const newCount = Math.max(3, Math.min(32, parseInt(geqBandCountInput.value, 10) || 16));
+            geqBandCountInput.value = newCount;
+            if (newCount === geqBandCount) return;
+            geqGains = equalizerSettings.interpolateGains(geqGains, newCount);
+            geqBandCount = newCount;
+            equalizerSettings.setGraphicEqGains(geqGains);
+            audioContextManager.setGraphicEqBandCount(newCount);
+            rebuildGeq();
+            geqPresetSelects.forEach((s) => (s.value = ''));
+        });
+    }
+
+    if (geqFreqMinInput && geqFreqMaxInput) {
+        geqFreqMinInput.value = geqFreqRange.min;
+        geqFreqMaxInput.value = geqFreqRange.max;
+
+        const handleFreqRangeChange = () => {
+            const newMin = Math.max(10, Math.min(96000, parseInt(geqFreqMinInput.value, 10) || 25));
+            const newMax = Math.max(10, Math.min(96000, parseInt(geqFreqMaxInput.value, 10) || 20000));
+            geqFreqMinInput.value = newMin;
+            geqFreqMaxInput.value = newMax;
+            if (newMin >= newMax) return;
+            if (newMin === geqFreqRange.min && newMax === geqFreqRange.max) return;
+            geqFreqRange = { min: newMin, max: newMax };
+            audioContextManager.setGraphicEqFreqRange(newMin, newMax);
+            rebuildGeq();
+        };
+
+        geqFreqMinInput.addEventListener('change', handleFreqRangeChange);
+        geqFreqMaxInput.addEventListener('change', handleFreqRangeChange);
+    }
+
+    // Legacy EQ Import / Export
+    const parseGeqLabelFrequency = (label) => {
+        const normalized = String(label).trim().toLowerCase().replace(/\s+/g, '');
+        if (normalized.endsWith('khz')) {
+            return Number.parseFloat(normalized.slice(0, -3)) * 1000;
+        }
+        const withoutHz = normalized.replace(/hz$/, '');
+        if (withoutHz.endsWith('k')) {
+            return Number.parseFloat(withoutHz.slice(0, -1)) * 1000;
+        }
+        return Number.parseFloat(withoutHz);
+    };
+    const legacyGeqExportBtn = document.getElementById('legacy-geq-export-btn');
+    const legacyGeqExportCsvBtn = document.getElementById('legacy-geq-export-csv-btn');
+    const legacyGeqImportBtn = document.getElementById('legacy-geq-import-btn');
+    const legacyGeqImportFile = document.getElementById('legacy-geq-import-file');
+
+    if (legacyGeqExportBtn) {
+        legacyGeqExportBtn.addEventListener('click', () => {
+            const lines = [`Preamp: ${geqPreamp.toFixed(1)} dB`];
+            GEQ_FREQUENCIES.forEach((freq, i) => {
+                // Q from octave spacing between adjacent bands
+                const prev = GEQ_FREQUENCIES[Math.max(0, i - 1)];
+                const next = GEQ_FREQUENCIES[Math.min(GEQ_FREQUENCIES.length - 1, i + 1)];
+                const octaves = Math.log2(next / prev);
+                const q =
+                    octaves > 0
+                        ? (Math.SQRT2 / (2 * Math.sinh((Math.LN2 / 2) * octaves))).toFixed(2)
+                        : Math.SQRT2.toFixed(2);
+                lines.push(`Filter ${i + 1}: ON PK Fc ${freq} Hz Gain ${geqGains[i].toFixed(1)} dB Q ${q}`);
+            });
+            const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'legacy-eq.txt';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+        });
+    }
+
+    if (legacyGeqExportCsvBtn) {
+        legacyGeqExportCsvBtn.addEventListener('click', () => {
+            const pairs = GEQ_FREQUENCIES.map((freq, i) => `${freq} ${geqGains[i].toFixed(1)}`).join('; ');
+            const lines = [`Preamp: ${geqPreamp.toFixed(1)} dB`, `GraphicEQ: ${pairs}`];
+            const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'legacy-eq-apo.txt';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+        });
+    }
+
+    if (legacyGeqImportBtn && legacyGeqImportFile) {
+        legacyGeqImportBtn.addEventListener('click', () => legacyGeqImportFile.click());
+        legacyGeqImportFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const text = event.target.result;
+                    const lines = text.split('\n');
+                    let preamp = geqPreamp;
+                    let hasPreamp = false;
+                    const importedPoints = [];
+
+                    for (const line of lines) {
+                        const preampMatch = line.match(/Preamp:\s*([-\d.]+)\s*dB/i);
+                        if (preampMatch) {
+                            preamp = parseFloat(preampMatch[1]);
+                            hasPreamp = true;
+                            continue;
+                        }
+                        // EqualizerAPO format: Filter N: ON PK Fc XXXX Hz Gain X.X dB Q X.XX
+                        const filterMatch = line.match(
+                            /Filter\s+\d+:\s*ON\s+\w+\s+Fc\s+([\d.]+[kK]?)\s*(?:Hz)?\s+Gain\s+([+-]?[\d.]+)\s*dB/i
+                        );
+                        if (filterMatch) {
+                            importedPoints.push({
+                                freq: parseGeqLabelFrequency(filterMatch[1]),
+                                gain: parseFloat(filterMatch[2]),
+                            });
+                            continue;
+                        }
+                        // Simple two-column format: freq gain (whitespace/tab/comma separated)
+                        const simpleMatch = line.trim().match(/^([\d.]+)\s*([kK])?(?:Hz)?\s*[,\s\t]+([+-]?[\d.]+)/);
+                        if (simpleMatch) {
+                            importedPoints.push({
+                                freq: parseGeqLabelFrequency(`${simpleMatch[1]}${simpleMatch[2] || ''}`),
+                                gain: parseFloat(simpleMatch[3]),
+                            });
+                        }
+                    }
+
+                    if (importedPoints.length === 0) return;
+
+                    // Filter out invalid frequencies (0, negative, NaN, Infinity)
+                    const validPoints = importedPoints.filter(
+                        (p) => Number.isFinite(p.freq) && p.freq > 0 && Number.isFinite(p.gain)
+                    );
+                    if (validPoints.length === 0) return;
+
+                    // Sort by frequency
+                    validPoints.sort((a, b) => a.freq - b.freq);
+
+                    // Map imported points to the GEQ bands using nearest-frequency matching
+                    const newGains = GEQ_FREQUENCIES.map((targetFreq) => {
+                        // Find the closest imported point by log-frequency distance
+                        let closest = validPoints[0];
+                        let minDist = Math.abs(Math.log10(targetFreq) - Math.log10(closest.freq));
+                        for (let j = 1; j < validPoints.length; j++) {
+                            const dist = Math.abs(Math.log10(targetFreq) - Math.log10(validPoints[j].freq));
+                            if (dist < minDist) {
+                                minDist = dist;
+                                closest = validPoints[j];
+                            }
+                        }
+                        // Clamp to slider range
+                        return Math.max(parseFloat(geqRange.min), Math.min(parseFloat(geqRange.max), closest.gain));
+                    });
+
+                    geqGains = newGains;
+                    equalizerSettings.setGraphicEqGains(geqGains);
+                    audioContextManager.setGraphicEqAllGains(geqGains);
+                    geqSyncAllSliders();
+                    if (hasPreamp) {
+                        geqPreamp = Math.max(-20, Math.min(20, preamp));
+                        equalizerSettings.setGraphicEqPreamp(geqPreamp);
+                        audioContextManager.setGraphicEqPreamp(geqPreamp);
+                        geqPreampSliders.forEach((s) => (s.value = geqPreamp));
+                        geqPreampValues.forEach((v) => (v.textContent = `${geqPreamp.toFixed(1)} dB`));
+                    }
+                    geqPresetSelects.forEach((s) => {
+                        s.value = '';
+                        s.dispatchEvent(new Event('change'));
+                    });
+                } catch (err) {
+                    console.error('[Legacy GEQ Import] Failed:', err);
+                }
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+        });
+    }
+
+    // Legacy EQ Custom Presets (Save / Delete)
+    const LEGACY_GEQ_CUSTOM_PRESETS_KEY = 'monochrome-legacy-geq-custom-presets';
+    // Migrate from old key if present
+    try {
+        const oldData = localStorage.getItem('legacy-geq-custom-presets');
+        if (oldData && !localStorage.getItem(LEGACY_GEQ_CUSTOM_PRESETS_KEY)) {
+            localStorage.setItem(LEGACY_GEQ_CUSTOM_PRESETS_KEY, oldData);
+            localStorage.removeItem('legacy-geq-custom-presets');
+        }
+    } catch {
+        /* ignore */
+    }
+    const legacyGeqSavePresetBtn = document.getElementById('legacy-geq-save-preset-btn');
+    const legacyGeqDeletePresetBtn = document.getElementById('legacy-geq-delete-preset-btn');
+
+    const getLegacyGeqCustomPresets = () => {
+        try {
+            const stored = localStorage.getItem(LEGACY_GEQ_CUSTOM_PRESETS_KEY);
+            return stored ? JSON.parse(stored) : {};
+        } catch {
+            return {};
+        }
+    };
+
+    const saveLegacyGeqCustomPresets = (presets) => {
+        try {
+            localStorage.setItem(LEGACY_GEQ_CUSTOM_PRESETS_KEY, JSON.stringify(presets));
+        } catch (e) {
+            console.error('[Legacy GEQ] Failed to save presets:', e);
+            alert('Failed to save preset. Storage may be full.');
+        }
+    };
+
+    /** Rebuild custom preset options in all legacy GEQ preset dropdowns */
+    const refreshLegacyGeqCustomPresetOptions = () => {
+        const presets = getLegacyGeqCustomPresets();
+        geqPresetSelects.forEach((select) => {
+            // Remove existing custom options
+            select.querySelectorAll('option[data-custom]').forEach((opt) => opt.remove());
+            // Remove existing separator
+            select.querySelectorAll('optgroup[data-custom-group]').forEach((g) => g.remove());
+
+            const entries = Object.entries(presets);
+            if (entries.length === 0) return;
+
+            const group = document.createElement('optgroup');
+            group.label = 'Custom Presets';
+            group.setAttribute('data-custom-group', '');
+            entries.forEach(([id, preset]) => {
+                const opt = document.createElement('option');
+                opt.value = id;
+                opt.textContent = preset.name;
+                opt.setAttribute('data-custom', '');
+                group.appendChild(opt);
+            });
+            select.appendChild(group);
+        });
+    };
+
+    // Populate custom presets on load
+    refreshLegacyGeqCustomPresetOptions();
+
+    /** Show/hide delete button based on whether a custom preset is selected */
+    const updateDeleteBtnVisibility = () => {
+        const val = legacyGeqPresetSelect?.value || '';
+        const isCustom = val.startsWith('geq_custom_');
+        if (legacyGeqDeletePresetBtn) {
+            legacyGeqDeletePresetBtn.style.display = isCustom ? '' : 'none';
+        }
+    };
+
+    // Update the preset change handler to also handle custom presets
+    geqPresetSelects.forEach((select) => {
+        select.addEventListener('change', () => {
+            const key = select.value;
+            if (!key) {
+                updateDeleteBtnVisibility();
+                return;
+            }
+
+            // Check custom presets first
+            const customPresets = getLegacyGeqCustomPresets();
+            if (customPresets[key]) {
+                const gains = customPresets[key]?.gains;
+                if (!Array.isArray(gains) || gains.length === 0) {
+                    updateDeleteBtnVisibility();
+                    return;
+                }
+                const adjusted =
+                    gains.length !== geqBandCount ? equalizerSettings.interpolateGains(gains, geqBandCount) : gains;
+                geqGains = adjusted.map((g) => {
+                    const n = Number(g);
+                    return Number.isFinite(n)
+                        ? Math.max(parseFloat(geqRange.min), Math.min(parseFloat(geqRange.max), n))
+                        : 0;
+                });
+                equalizerSettings.setGraphicEqGains(geqGains);
+                audioContextManager.setGraphicEqAllGains(geqGains);
+                geqSyncAllSliders();
+                if (customPresets[key].preamp !== undefined) {
+                    geqPreamp = customPresets[key].preamp;
+                    equalizerSettings.setGraphicEqPreamp(geqPreamp);
+                    audioContextManager.setGraphicEqPreamp(geqPreamp);
+                    geqPreampSliders.forEach((s) => (s.value = geqPreamp));
+                    geqPreampValues.forEach((v) => (v.textContent = `${geqPreamp.toFixed(1)} dB`));
+                }
+                geqPresetSelects.forEach((s) => {
+                    if (s !== select) s.value = key;
+                });
+                updateDeleteBtnVisibility();
+                return;
+            }
+            updateDeleteBtnVisibility();
+        });
+    });
+
+    if (legacyGeqSavePresetBtn) {
+        legacyGeqSavePresetBtn.addEventListener('click', () => {
+            const name = prompt('Preset name:');
+            if (!name || !name.trim()) return;
+            const sanitized = name.trim().substring(0, 50);
+            const presets = getLegacyGeqCustomPresets();
+            const id = 'geq_custom_' + Date.now();
+            presets[id] = {
+                name: sanitized,
+                gains: geqGains.map((g) => Math.round(g * 10) / 10),
+                preamp: Math.round(geqPreamp * 10) / 10,
+            };
+            saveLegacyGeqCustomPresets(presets);
+            refreshLegacyGeqCustomPresetOptions();
+            geqPresetSelects.forEach((s) => (s.value = id));
+            updateDeleteBtnVisibility();
+        });
+    }
+
+    if (legacyGeqDeletePresetBtn) {
+        legacyGeqDeletePresetBtn.addEventListener('click', () => {
+            const selected = legacyGeqPresetSelect?.value || '';
+            if (!selected.startsWith('geq_custom_')) return;
+            const presets = getLegacyGeqCustomPresets();
+            const presetName = presets[selected]?.name || selected;
+            if (!confirm(`Delete preset "${presetName}"?`)) return;
+            delete presets[selected];
+            saveLegacyGeqCustomPresets(presets);
+            refreshLegacyGeqCustomPresetOptions();
+            geqPresetSelects.forEach((s) => (s.value = ''));
+            updateDeleteBtnVisibility();
+        });
+    }
+
+    // ========================================
     // Precision AutoEQ - Redesigned Equalizer
     // ========================================
     const eqToggle = document.getElementById('equalizer-enabled-toggle');
@@ -1254,8 +1910,8 @@ export async function initializeSettings(scrobbler, player, api, ui) {
     let graphAnimFrame = null;
 
     // dB zoom state (half-range values, user-adjustable via scroll on Y axis)
-    let graphDbHalfAutoEQ = 25;
-    let graphDbHalfParametric = 35;
+    let graphDbHalfAutoEQ = 16;
+    let graphDbHalfParametric = 16;
 
     /** Get the active bands for the current mode */
     const getActiveBands = () => {
@@ -1362,6 +2018,15 @@ export async function initializeSettings(scrobbler, player, api, ui) {
     /**
      * Draw the frequency response graph with Original, Target, and Corrected curves
      */
+    let _drawGraphRafId = null;
+    const scheduleDrawAutoEQGraph = () => {
+        if (_drawGraphRafId) return;
+        _drawGraphRafId = requestAnimationFrame(() => {
+            _drawGraphRafId = null;
+            drawAutoEQGraph();
+        });
+    };
+
     const drawAutoEQGraph = () => {
         if (!autoeqCanvas) return;
         const activeBands = getActiveBands();
@@ -1644,16 +2309,17 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                 const x = gx(band.freq);
                 // In parametric mode: node Y = band's individual response at its freq (basically its gain)
                 // In AutoEQ mode: node Y = corrected curve value at band freq (shifted)
-                let nodeGain;
+                let nodeGain, sumGain;
                 if (isParametricMode) {
-                    // Sum all bands' response at this frequency
-                    let totalGain = 0;
+                    // Node sits at individual band gain; sum is for tooltip only
+                    nodeGain = band.gain;
+                    sumGain = 0;
                     for (const b of activeBands) {
-                        if (b.enabled) totalGain += calculateBiquadResponse(band.freq, b, sampleRate);
+                        if (b.enabled) sumGain += calculateBiquadResponse(band.freq, b, sampleRate);
                     }
-                    nodeGain = totalGain;
                 } else {
                     nodeGain = interpolate(band.freq, autoeqCorrectedCurve) + graphShift;
+                    sumGain = nodeGain;
                 }
                 const y = gy(nodeGain);
 
@@ -1704,20 +2370,39 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
 
+                // Show M/S channel label inside node for non-stereo bands
+                const bandChannel = band.channel || 'stereo';
+                if (bandChannel !== 'stereo') {
+                    ctx.save();
+                    ctx.font = `bold ${isDragged ? 10 : isHovered ? 9 : 7}px system-ui, sans-serif`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = isDragged ? nodeColor : '#fff';
+                    ctx.fillText(bandChannel === 'mid' ? 'M' : 'S', x, y + 0.5);
+                    ctx.restore();
+                }
+
                 // Show tooltip on drag
                 if (isDragged) {
                     ctx.save();
-                    ctx.fillStyle = 'rgba(0,0,0,0.8)';
-                    const txt = `${Math.round(band.freq)} Hz  ${band.gain > 0 ? '+' : ''}${band.gain.toFixed(1)} dB  Q${band.q.toFixed(2)}`;
                     ctx.font = 'bold 11px system-ui, sans-serif';
-                    const tw = ctx.measureText(txt).width + 12;
-                    const tx = Math.min(x - tw / 2, rect.width - tw - 5);
-                    const ty = y - 28;
-                    ctx.fillRect(tx, ty, tw, 20);
+                    const chLabel = bandChannel !== 'stereo' ? ` [${bandChannel.toUpperCase()}]` : '';
+                    const line1 = `${Math.round(band.freq)} Hz  ${band.gain > 0 ? '+' : ''}${band.gain.toFixed(1)} dB  Q${band.q.toFixed(2)}${chLabel}`;
+                    const line2 = `Sum: ${sumGain > 0 ? '+' : ''}${sumGain.toFixed(1)} dB`;
+                    const tw1 = ctx.measureText(line1).width;
+                    const tw2 = ctx.measureText(line2).width;
+                    const tw = Math.max(tw1, tw2) + 12;
+                    const th = 34;
+                    const tx = Math.max(5, Math.min(x - tw / 2, rect.width - tw - 5));
+                    const ty = y - 44;
+                    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+                    ctx.fillRect(tx, ty, tw, th);
                     ctx.fillStyle = '#fff';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText(txt, tx + tw / 2, ty + 10);
+                    ctx.fillText(line1, tx + tw / 2, ty + 10);
+                    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                    ctx.fillText(line2, tx + tw / 2, ty + 24);
                     ctx.restore();
                 }
             });
@@ -1809,7 +2494,6 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             else if (meas) graphShift = 75 - getNormalizationOffset(meas);
         }
 
-        const sampleRate = autoeqSampleRate ? parseInt(autoeqSampleRate.value, 10) : 48000;
         let closest = -1,
             closestDist = Infinity;
         activeBands.forEach((band, i) => {
@@ -1817,10 +2501,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             const x = padLeft + freqToX(band.freq, w);
             let nodeGain;
             if (isParam) {
-                nodeGain = 0;
-                for (const b of activeBands) {
-                    if (b.enabled) nodeGain += calculateBiquadResponse(band.freq, b, sampleRate);
-                }
+                nodeGain = band.gain;
             } else {
                 nodeGain = interpolate(band.freq, autoeqCorrectedCurve) + graphShift;
             }
@@ -1858,19 +2539,42 @@ export async function initializeSettings(scrobbler, player, api, ui) {
     // ========================================
     if (autoeqCanvas) {
         autoeqCanvas.addEventListener('mousedown', (e) => {
+            hideEqContextMenu();
+            hideEmptyContextMenu();
             const coords = getCanvasCoords(e);
             const nodeIdx = findClosestNode(coords.x, coords.y, 18);
             if (nodeIdx >= 0) {
+                // Clicked directly on a node - start dragging
                 draggedNode = nodeIdx;
                 autoeqCanvas.style.cursor = 'grabbing';
                 e.preventDefault();
             }
         });
 
-        autoeqCanvas.addEventListener('mousemove', (e) => {
-            const coords = getCanvasCoords(e);
-            const bands = getActiveBands();
-            if (draggedNode !== null && bands) {
+        // Helper to compute canvas-relative coords from any mouse event (even outside the canvas)
+        const getCanvasCoordsFromEvent = (e) => {
+            const rect = autoeqCanvas.getBoundingClientRect();
+            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        };
+
+        // Clean up previous document-level listeners and observer on re-initialization
+        if (_graphAbortController) _graphAbortController.abort();
+        _graphAbortController = new AbortController();
+        const graphSignal = _graphAbortController.signal;
+        if (_graphResizeObserver) {
+            _graphResizeObserver.disconnect();
+            _graphResizeObserver = null;
+        }
+
+        // Document-level mousemove so dragging continues outside the canvas
+        document.addEventListener(
+            'mousemove',
+            (e) => {
+                if (draggedNode === null) return;
+                const bands = getActiveBands();
+                if (!bands) return;
+
+                const coords = getCanvasCoordsFromEvent(e);
                 const rect = autoeqCanvas.getBoundingClientRect();
                 const padLeft = 40,
                     padRight = 10,
@@ -1907,36 +2611,262 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                         graphAnimFrame = null;
                     });
                 }
+            },
+            { signal: graphSignal }
+        );
+
+        // Canvas-only mousemove for hover cursor changes (when not dragging)
+        autoeqCanvas.addEventListener('mousemove', (e) => {
+            if (draggedNode !== null) return; // dragging is handled by document listener
+            const coords = getCanvasCoords(e);
+            const padLeft = 40;
+            if (coords.x <= padLeft + 10) {
+                autoeqCanvas.style.cursor = 'ns-resize';
+                if (hoveredNode !== null) {
+                    hoveredNode = null;
+                    drawAutoEQGraph();
+                }
             } else {
-                const padLeft = 40;
-                if (coords.x <= padLeft + 10) {
-                    autoeqCanvas.style.cursor = 'ns-resize';
-                    if (hoveredNode !== null) {
-                        hoveredNode = null;
-                        drawAutoEQGraph();
-                    }
-                } else {
-                    const newHovered = findClosestNode(coords.x, coords.y, 18);
-                    if (newHovered !== hoveredNode) {
-                        hoveredNode = newHovered;
-                        autoeqCanvas.style.cursor = hoveredNode >= 0 ? 'grab' : 'crosshair';
-                        drawAutoEQGraph();
-                    }
+                const newHovered = findClosestNode(coords.x, coords.y, 18);
+                if (newHovered !== hoveredNode) {
+                    hoveredNode = newHovered;
+                    autoeqCanvas.style.cursor = hoveredNode >= 0 ? 'grab' : 'crosshair';
+                    drawAutoEQGraph();
                 }
             }
         });
 
-        autoeqCanvas.addEventListener('mouseup', () => {
-            draggedNode = null;
-            autoeqCanvas.style.cursor = hoveredNode >= 0 ? 'grab' : 'crosshair';
-        });
+        // Document-level mouseup so drag ends even if cursor is outside the canvas
+        document.addEventListener(
+            'mouseup',
+            () => {
+                if (draggedNode !== null) {
+                    draggedNode = null;
+                    autoeqCanvas.style.cursor = hoveredNode >= 0 ? 'grab' : 'crosshair';
+                }
+            },
+            { signal: graphSignal }
+        );
 
         autoeqCanvas.addEventListener('mouseleave', () => {
-            draggedNode = null;
+            // Only reset hover state, NOT drag state (drag continues outside canvas)
             hoveredNode = null;
-            autoeqCanvas.style.cursor = 'crosshair';
+            if (draggedNode === null) {
+                autoeqCanvas.style.cursor = 'crosshair';
+            }
             drawAutoEQGraph();
         });
+
+        // ========================================
+        // EQ Node Right-Click Context Menu
+        // ========================================
+        const eqCtxMenu = document.getElementById('eq-node-context-menu');
+        let contextMenuNodeIdx = null;
+
+        const hideEqContextMenu = () => {
+            if (eqCtxMenu) eqCtxMenu.style.display = 'none';
+            contextMenuNodeIdx = null;
+        };
+
+        const showEqContextMenu = (x, y, nodeIdx) => {
+            if (!eqCtxMenu) return;
+            const bands = getActiveBands();
+            if (!bands || !bands[nodeIdx]) return;
+
+            contextMenuNodeIdx = nodeIdx;
+            const band = bands[nodeIdx];
+
+            // Update active states for filter type items
+            eqCtxMenu.querySelectorAll('.eq-ctx-type').forEach((li) => {
+                const action = li.dataset.action;
+                const isActive =
+                    (action === 'eq-type-lowshelf' && band.type === 'lowshelf') ||
+                    (action === 'eq-type-peaking' && band.type === 'peaking') ||
+                    (action === 'eq-type-highshelf' && band.type === 'highshelf');
+                li.classList.toggle('eq-ctx-active', isActive);
+            });
+
+            // Update active states for channel items (per-band M/S mode)
+            const bandChannel = band.channel || 'stereo';
+            eqCtxMenu.querySelectorAll('.eq-ctx-channel').forEach((li) => {
+                const action = li.dataset.action;
+                const isActive =
+                    (action === 'eq-channel-stereo' && bandChannel === 'stereo') ||
+                    (action === 'eq-channel-mid' && bandChannel === 'mid') ||
+                    (action === 'eq-channel-side' && bandChannel === 'side');
+                li.classList.toggle('eq-ctx-active', isActive);
+            });
+
+            // Position menu at cursor, clamped to viewport
+            eqCtxMenu.style.display = 'block';
+            const menuRect = eqCtxMenu.getBoundingClientRect();
+            const clampedX = Math.min(x, window.innerWidth - menuRect.width - 4);
+            const clampedY = Math.min(y, window.innerHeight - menuRect.height - 4);
+            eqCtxMenu.style.left = `${clampedX}px`;
+            eqCtxMenu.style.top = `${clampedY}px`;
+        };
+
+        if (eqCtxMenu) {
+            // Handle menu item clicks
+            eqCtxMenu.addEventListener('click', (e) => {
+                const li = e.target.closest('li[data-action]');
+                if (!li) return;
+
+                const action = li.dataset.action;
+                const bands = getActiveBands();
+
+                // Filter type actions
+                if (
+                    action.startsWith('eq-type-') &&
+                    contextMenuNodeIdx !== null &&
+                    bands &&
+                    bands[contextMenuNodeIdx]
+                ) {
+                    const typeMap = {
+                        'eq-type-lowshelf': 'lowshelf',
+                        'eq-type-peaking': 'peaking',
+                        'eq-type-highshelf': 'highshelf',
+                    };
+                    const newType = typeMap[action];
+                    if (newType) {
+                        bands[contextMenuNodeIdx].type = newType;
+                        computeCorrectedCurve();
+                        applyBandsToAudio(bands);
+                        renderBandControls(bands);
+                        drawAutoEQGraph();
+                    }
+                }
+
+                // Channel actions (per-band M/S mode)
+                if (
+                    action.startsWith('eq-channel-') &&
+                    contextMenuNodeIdx !== null &&
+                    bands &&
+                    bands[contextMenuNodeIdx]
+                ) {
+                    const channelMap = {
+                        'eq-channel-stereo': 'stereo',
+                        'eq-channel-mid': 'mid',
+                        'eq-channel-side': 'side',
+                    };
+                    const newChannel = channelMap[action];
+                    if (newChannel) {
+                        bands[contextMenuNodeIdx].channel = newChannel;
+                        computeCorrectedCurve();
+                        applyBandsToAudio(bands);
+                        renderBandControls(bands);
+                        drawAutoEQGraph();
+                    }
+                }
+
+                hideEqContextMenu();
+            });
+        }
+
+        // Empty-space context menu (Add Node)
+        const eqEmptyCtxMenu = document.getElementById('eq-empty-context-menu');
+        let pendingAddCoords = null;
+
+        const hideEmptyContextMenu = () => {
+            if (eqEmptyCtxMenu) eqEmptyCtxMenu.style.display = 'none';
+            pendingAddCoords = null;
+        };
+
+        const showEmptyContextMenu = (clientX, clientY, canvasCoords) => {
+            if (!eqEmptyCtxMenu) return;
+            pendingAddCoords = canvasCoords;
+            eqEmptyCtxMenu.style.display = 'block';
+            const menuRect = eqEmptyCtxMenu.getBoundingClientRect();
+            eqEmptyCtxMenu.style.left = `${Math.min(clientX, window.innerWidth - menuRect.width - 4)}px`;
+            eqEmptyCtxMenu.style.top = `${Math.min(clientY, window.innerHeight - menuRect.height - 4)}px`;
+        };
+
+        if (eqEmptyCtxMenu) {
+            eqEmptyCtxMenu.addEventListener('click', (e) => {
+                const li = e.target.closest('li[data-action]');
+                if (!li || li.dataset.action !== 'eq-add-node' || !pendingAddCoords) return;
+
+                const isParam = currentMode === 'parametric';
+                let bands = getActiveBands();
+                if (!bands) {
+                    if (currentMode === 'autoeq') {
+                        autoeqCurrentBands = [];
+                        bands = autoeqCurrentBands;
+                    } else {
+                        hideEmptyContextMenu();
+                        return;
+                    }
+                }
+                if (bands.length >= 32) {
+                    hideEmptyContextMenu();
+                    return;
+                }
+
+                const rect = autoeqCanvas.getBoundingClientRect();
+                const padLeft = 40,
+                    padRight = 10,
+                    padTop = 10,
+                    padBottom = 30;
+                const w = rect.width - padLeft - padRight;
+                const h = rect.height - padTop - padBottom;
+                const dbCenter = isParam ? 0 : 75;
+                const dbHalf = isParam ? graphDbHalfParametric : graphDbHalfAutoEQ;
+                const dbMin = dbCenter - dbHalf;
+                const dbMax = dbCenter + dbHalf;
+                const freq = Math.max(20, Math.min(20000, Math.round(xToFreq(pendingAddCoords.x - padLeft, w))));
+                const gain = Math.max(
+                    -30,
+                    Math.min(30, Math.round((yToDb(pendingAddCoords.y - padTop, h, dbMin, dbMax) - dbCenter) * 10) / 10)
+                );
+
+                bands.push({ id: bands.length, type: 'peaking', freq, gain, q: 1.0, enabled: true, channel: 'stereo' });
+                setActiveBands(bands);
+                computeCorrectedCurve();
+                applyBandsToAudio(bands);
+                renderBandControls(bands);
+                drawAutoEQGraph();
+                hideEmptyContextMenu();
+            });
+        }
+
+        // Right-click on canvas: show node menu or empty-space menu
+        autoeqCanvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            hideEmptyContextMenu();
+            hideEqContextMenu();
+            const coords = getCanvasCoords(e);
+            const nodeIdx = findClosestNode(coords.x, coords.y, 18);
+            if (nodeIdx >= 0) {
+                showEqContextMenu(e.clientX, e.clientY, nodeIdx);
+            } else {
+                showEmptyContextMenu(e.clientX, e.clientY, coords);
+            }
+        });
+
+        // Dismiss context menus when clicking outside the EQ graph area
+        document.addEventListener(
+            'mousedown',
+            (e) => {
+                const graphWrapper = document.getElementById('autoeq-graph-wrapper');
+                if (
+                    contextMenuNodeIdx !== null &&
+                    eqCtxMenu &&
+                    !eqCtxMenu.contains(e.target) &&
+                    (!graphWrapper || !graphWrapper.contains(e.target))
+                ) {
+                    hideEqContextMenu();
+                }
+                if (
+                    pendingAddCoords &&
+                    eqEmptyCtxMenu &&
+                    !eqEmptyCtxMenu.contains(e.target) &&
+                    (!graphWrapper || !graphWrapper.contains(e.target))
+                ) {
+                    hideEmptyContextMenu();
+                }
+            },
+            { signal: graphSignal }
+        );
 
         autoeqCanvas.addEventListener('dblclick', (e) => {
             e.preventDefault();
@@ -1993,7 +2923,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                     -30,
                     Math.min(30, Math.round((yToDb(coords.y - padTop, h, dbMin, dbMax) - dbCenter) * 10) / 10)
                 );
-                bands.push({ id: bands.length, type: 'peaking', freq, gain, q: 1.0, enabled: true });
+                bands.push({ id: bands.length, type: 'peaking', freq, gain, q: 1.0, enabled: true, channel: 'stereo' });
             }
 
             setActiveBands(bands);
@@ -2038,16 +2968,14 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             { passive: false }
         );
 
-        // Touch support
+        // Touch support - drag nodes on direct touch, continue drag outside canvas
         let touchNodeIdx = -1;
         autoeqCanvas.addEventListener(
             'touchstart',
             (e) => {
                 const touch = e.touches[0];
-                const coords = {
-                    x: touch.clientX - autoeqCanvas.getBoundingClientRect().left,
-                    y: touch.clientY - autoeqCanvas.getBoundingClientRect().top,
-                };
+                const rect = autoeqCanvas.getBoundingClientRect();
+                const coords = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
                 touchNodeIdx = findClosestNode(coords.x, coords.y, 25);
                 if (touchNodeIdx >= 0) {
                     draggedNode = touchNodeIdx;
@@ -2057,55 +2985,74 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             { passive: false }
         );
 
-        autoeqCanvas.addEventListener(
+        // Document-level touchmove so dragging continues outside canvas
+        document.addEventListener(
             'touchmove',
             (e) => {
+                if (draggedNode === null) return;
                 const tBands = getActiveBands();
-                if (draggedNode !== null && tBands) {
-                    const touch = e.touches[0];
-                    const rect = autoeqCanvas.getBoundingClientRect();
-                    const coords = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
-                    const padLeft = 40,
-                        padRight = 10,
-                        padTop = 10,
-                        padBottom = 30;
-                    const w = rect.width - padLeft - padRight;
-                    const h = rect.height - padTop - padBottom;
+                if (!tBands) return;
 
-                    const freq = xToFreq(coords.x - padLeft, w);
-                    tBands[draggedNode].freq = Math.max(20, Math.min(20000, freq));
+                const touch = e.touches[0];
+                const rect = autoeqCanvas.getBoundingClientRect();
+                const coords = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+                const padLeft = 40,
+                    padRight = 10,
+                    padTop = 10,
+                    padBottom = 30;
+                const w = rect.width - padLeft - padRight;
+                const h = rect.height - padTop - padBottom;
 
-                    if (currentMode === 'parametric') {
-                        const newGain = yToDb(coords.y - padTop, h, -graphDbHalfParametric, graphDbHalfParametric);
-                        tBands[draggedNode].gain = Math.max(-30, Math.min(30, Math.round(newGain * 10) / 10));
-                    }
+                const isParam = currentMode === 'parametric';
+                const dbCenter = isParam ? 0 : 75;
+                const dbHalf = isParam ? graphDbHalfParametric : graphDbHalfAutoEQ;
+                const dbMin = dbCenter - dbHalf;
+                const dbMax = dbCenter + dbHalf;
 
-                    computeCorrectedCurve();
-                    applyBandsToAudio(tBands);
-                    if (!graphAnimFrame) {
-                        graphAnimFrame = requestAnimationFrame(() => {
-                            drawAutoEQGraph();
-                            renderBandControls(tBands);
-                            graphAnimFrame = null;
-                        });
-                    }
-                    e.preventDefault();
+                const freq = xToFreq(coords.x - padLeft, w);
+                tBands[draggedNode].freq = Math.max(20, Math.min(20000, freq));
+
+                if (isParam) {
+                    const newGain = yToDb(coords.y - padTop, h, dbMin, dbMax);
+                    tBands[draggedNode].gain = Math.max(-30, Math.min(30, Math.round(newGain * 10) / 10));
+                } else {
+                    const corrGain = interpolate(tBands[draggedNode].freq, autoeqCorrectedCurve || []);
+                    const newDb = yToDb(coords.y - padTop, h, dbMin, dbMax);
+                    const gainDelta = newDb - corrGain;
+                    tBands[draggedNode].gain = Math.max(-30, Math.min(30, tBands[draggedNode].gain + gainDelta * 0.3));
                 }
+
+                computeCorrectedCurve();
+                applyBandsToAudio(tBands);
+                if (!graphAnimFrame) {
+                    graphAnimFrame = requestAnimationFrame(() => {
+                        drawAutoEQGraph();
+                        renderBandControls(tBands);
+                        graphAnimFrame = null;
+                    });
+                }
+                e.preventDefault();
             },
-            { passive: false }
+            { passive: false, signal: graphSignal }
         );
 
-        autoeqCanvas.addEventListener('touchend', () => {
-            draggedNode = null;
-            touchNodeIdx = -1;
-        });
+        document.addEventListener(
+            'touchend',
+            () => {
+                if (draggedNode !== null) {
+                    draggedNode = null;
+                    touchNodeIdx = -1;
+                }
+            },
+            { signal: graphSignal }
+        );
 
         // Resize observer for graph
         if (autoeqGraphWrapper) {
-            const ro = new ResizeObserver(() => {
-                drawAutoEQGraph();
+            _graphResizeObserver = new ResizeObserver(() => {
+                scheduleDrawAutoEQGraph();
             });
-            ro.observe(autoeqGraphWrapper);
+            _graphResizeObserver.observe(autoeqGraphWrapper);
         }
     }
 
@@ -2122,6 +3069,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             control.className = 'autoeq-band-control';
             control.dataset.band = i;
             const currentType = band.type || 'peaking';
+            const currentChannel = band.channel || 'stereo';
             control.innerHTML = `
                 <div class="autoeq-band-header">
                     <span class="autoeq-band-number">${i + 1}</span>
@@ -2129,6 +3077,11 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                         <option value="peaking"${currentType === 'peaking' ? ' selected' : ''}>PK</option>
                         <option value="lowshelf"${currentType === 'lowshelf' ? ' selected' : ''}>LSF</option>
                         <option value="highshelf"${currentType === 'highshelf' ? ' selected' : ''}>HSF</option>
+                    </select>
+                    <select class="autoeq-channel-select">
+                        <option value="stereo"${currentChannel === 'stereo' ? ' selected' : ''}>ST</option>
+                        <option value="mid"${currentChannel === 'mid' ? ' selected' : ''}>M</option>
+                        <option value="side"${currentChannel === 'side' ? ' selected' : ''}>S</option>
                     </select>
                     <div class="autoeq-band-param">
                         <span class="autoeq-band-param-label">Freq</span>
@@ -2166,7 +3119,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                 freqVal.textContent = `${formatFreq(bands[i].freq)} Hz`;
                 computeCorrectedCurve();
                 applyBandsToAudio(bands);
-                drawAutoEQGraph();
+                scheduleDrawAutoEQGraph();
             });
 
             gainSlider.addEventListener('input', () => {
@@ -2176,7 +3129,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                 gainVal.textContent = `${bands[i].gain > 0 ? '+' : ''}${bands[i].gain.toFixed(1)} dB`;
                 computeCorrectedCurve();
                 applyBandsToAudio(bands);
-                drawAutoEQGraph();
+                scheduleDrawAutoEQGraph();
             });
 
             qSlider.addEventListener('input', () => {
@@ -2186,7 +3139,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                 qVal.textContent = bands[i].q.toFixed(2);
                 computeCorrectedCurve();
                 applyBandsToAudio(bands);
-                drawAutoEQGraph();
+                scheduleDrawAutoEQGraph();
             });
 
             const typeSelect = control.querySelector('.autoeq-type-select');
@@ -2196,7 +3149,17 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                 bands[i].type = typeSelect.value;
                 computeCorrectedCurve();
                 applyBandsToAudio(bands);
-                drawAutoEQGraph();
+                scheduleDrawAutoEQGraph();
+            });
+
+            const channelSelect = control.querySelector('.autoeq-channel-select');
+            channelSelect.addEventListener('change', () => {
+                const bands = getActiveBands();
+                if (!bands || !bands[i]) return;
+                bands[i].channel = channelSelect.value;
+                computeCorrectedCurve();
+                applyBandsToAudio(bands);
+                scheduleDrawAutoEQGraph();
             });
         });
     };
@@ -2212,7 +3175,15 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             const defaultBands = [];
             for (let i = 0; i < 10; i++) {
                 const freq = 20 * Math.pow(20000 / 20, i / 9);
-                defaultBands.push({ id: i, type: 'peaking', freq: Math.round(freq), gain: 0, q: 1.0, enabled: true });
+                defaultBands.push({
+                    id: i,
+                    type: 'peaking',
+                    freq: Math.round(freq),
+                    gain: 0,
+                    q: 1.0,
+                    enabled: true,
+                    channel: 'stereo',
+                });
             }
             parametricBands = defaultBands;
             applyBandsToAudio(parametricBands);
@@ -2254,6 +3225,22 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             if (autoeqFiltersCollapse) autoeqFiltersCollapse.classList.toggle('collapsed');
             if (autoeqFiltersContent)
                 autoeqFiltersContent.style.display = autoeqFiltersContent.style.display === 'none' ? 'flex' : 'none';
+        });
+    }
+
+    // Database section collapse
+    const autoeqDatabaseToggle = document.getElementById('autoeq-database-toggle');
+    const autoeqDatabaseCollapse = document.getElementById('autoeq-database-collapse');
+    const autoeqDatabaseBody = document.getElementById('autoeq-database-body');
+    if (autoeqDatabaseToggle) {
+        autoeqDatabaseToggle.addEventListener('click', () => {
+            if (autoeqDatabaseCollapse) autoeqDatabaseCollapse.classList.toggle('collapsed');
+            if (autoeqDatabaseBody)
+                autoeqDatabaseBody.style.display = autoeqDatabaseBody.style.display === 'none' ? '' : 'none';
+            if (autoeqDatabaseCollapse) {
+                const isExpanded = !autoeqDatabaseCollapse.classList.contains('collapsed');
+                autoeqDatabaseCollapse.setAttribute('aria-expanded', String(isExpanded));
+            }
         });
     }
 
@@ -3085,6 +4072,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                 gain: 0,
                 q: 1.41,
                 enabled: true,
+                channel: 'stereo',
             })),
             preamp: 0,
         };
@@ -3113,13 +4101,17 @@ export async function initializeSettings(scrobbler, player, api, ui) {
         const presetRow = document.getElementById('autoeq-preset-row');
         const parametricProfiles = document.getElementById('autoeq-parametric-profiles');
         const speakerSavedSection = document.getElementById('speaker-saved-section');
+        const legacySection = document.getElementById('graphic-eq-section');
 
         // Reset interactive state on switch
         draggedNode = null;
         hoveredNode = null;
 
-        // Graph always visible in all modes
-        if (graphSection) graphSection.style.display = '';
+        // Graph visible in all modes except legacy
+        if (graphSection) graphSection.style.display = mode === 'legacy' ? 'none' : '';
+        // Legend only relevant in modes with Original/Target/Corrected curves
+        const graphLegend = document.querySelector('.autoeq-graph-legend');
+        if (graphLegend) graphLegend.style.display = mode === 'autoeq' || mode === 'speaker' ? '' : 'none';
         // Only show shared AutoEq button in AutoEQ mode
         if (autoeqRunBtn) autoeqRunBtn.style.display = mode === 'autoeq' ? '' : 'none';
 
@@ -3132,6 +4124,20 @@ export async function initializeSettings(scrobbler, player, api, ui) {
         if (parametricProfiles) parametricProfiles.style.display = 'none';
         if (speakerSection) speakerSection.style.display = 'none';
         if (speakerSavedSection) speakerSavedSection.style.display = 'none';
+        if (legacySection) legacySection.style.display = 'none';
+
+        if (mode === 'legacy') {
+            if (legacySection) legacySection.style.display = '';
+            // Disable parametric EQ entirely - only graphic EQ active to save resources
+            audioContextManager.isEQEnabled = false;
+            audioContextManager.toggleGraphicEQ(equalizerSettings.isEnabled());
+            equalizerSettings.setGraphicEqEnabled(true);
+        } else {
+            // Disable graphic EQ entirely - only parametric EQ active to save resources
+            audioContextManager.isEQEnabled = equalizerSettings.isEnabled();
+            audioContextManager.toggleGraphicEQ(false);
+            equalizerSettings.setGraphicEqEnabled(false);
+        }
 
         if (mode === 'autoeq') {
             if (controlsSection) controlsSection.style.display = '';
@@ -3195,6 +4201,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
         const hp = document.getElementById('eq-howto-panel');
         if (hp && hp.style.display !== 'none') {
             const tabs = {
+                legacy: document.getElementById('eq-howto-legacy'),
                 autoeq: document.getElementById('eq-howto-autoeq'),
                 parametric: document.getElementById('eq-howto-parametric'),
                 speaker: document.getElementById('eq-howto-speaker'),
@@ -3217,6 +4224,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
     const howtoPanel = document.getElementById('eq-howto-panel');
     const howtoClose = document.getElementById('eq-howto-close');
     const howtoTabs = {
+        legacy: document.getElementById('eq-howto-legacy'),
         autoeq: document.getElementById('eq-howto-autoeq'),
         parametric: document.getElementById('eq-howto-parametric'),
         speaker: document.getElementById('eq-howto-speaker'),
@@ -3273,12 +4281,145 @@ export async function initializeSettings(scrobbler, player, api, ui) {
     // ========================================
     // Parametric EQ Preset Selector
     // ========================================
+
+    // Mid/Side presets define complete band arrays with per-band channel modes
+    const MS_PRESETS = {
+        shelf_warm: {
+            name: 'Warm',
+            bands: [
+                { id: 0, type: 'lowshelf', freq: 200, gain: 3.0, q: 0.7, enabled: true, channel: 'stereo' },
+                { id: 1, type: 'highshelf', freq: 6000, gain: -2.0, q: 0.6, enabled: true, channel: 'stereo' },
+                { id: 2, type: 'peaking', freq: 3000, gain: -1.0, q: 1.2, enabled: true, channel: 'stereo' },
+                { id: 3, type: 'peaking', freq: 800, gain: 0.5, q: 0.8, enabled: true, channel: 'stereo' },
+            ],
+        },
+        shelf_bright: {
+            name: 'Bright & Airy',
+            bands: [
+                { id: 0, type: 'highshelf', freq: 8000, gain: 3.0, q: 0.5, enabled: true, channel: 'stereo' },
+                { id: 1, type: 'lowshelf', freq: 150, gain: -1.5, q: 0.6, enabled: true, channel: 'stereo' },
+                { id: 2, type: 'peaking', freq: 5000, gain: 1.0, q: 1.5, enabled: true, channel: 'stereo' },
+                { id: 3, type: 'peaking', freq: 2500, gain: 0.5, q: 1.0, enabled: true, channel: 'stereo' },
+            ],
+        },
+        shelf_hifi: {
+            name: 'Hi-Fi',
+            bands: [
+                { id: 0, type: 'lowshelf', freq: 80, gain: 2.5, q: 0.7, enabled: true, channel: 'stereo' },
+                { id: 1, type: 'highshelf', freq: 10000, gain: 2.0, q: 0.5, enabled: true, channel: 'stereo' },
+                { id: 2, type: 'peaking', freq: 400, gain: -1.0, q: 1.0, enabled: true, channel: 'stereo' },
+                { id: 3, type: 'peaking', freq: 3000, gain: 0.5, q: 1.5, enabled: true, channel: 'stereo' },
+            ],
+        },
+        shelf_dark: {
+            name: 'Dark & Smooth',
+            bands: [
+                { id: 0, type: 'highshelf', freq: 5000, gain: -3.0, q: 0.5, enabled: true, channel: 'stereo' },
+                { id: 1, type: 'lowshelf', freq: 150, gain: 2.0, q: 0.7, enabled: true, channel: 'stereo' },
+                { id: 2, type: 'peaking', freq: 2500, gain: -1.5, q: 1.2, enabled: true, channel: 'stereo' },
+                { id: 3, type: 'peaking', freq: 600, gain: 0.5, q: 0.8, enabled: true, channel: 'stereo' },
+            ],
+        },
+        shelf_radio: {
+            name: 'Radio Ready',
+            bands: [
+                { id: 0, type: 'lowshelf', freq: 100, gain: 2.0, q: 0.7, enabled: true, channel: 'stereo' },
+                { id: 1, type: 'peaking', freq: 3000, gain: 2.0, q: 1.8, enabled: true, channel: 'stereo' },
+                { id: 2, type: 'highshelf', freq: 10000, gain: 1.5, q: 0.5, enabled: true, channel: 'stereo' },
+                { id: 3, type: 'peaking', freq: 500, gain: -1.5, q: 1.0, enabled: true, channel: 'stereo' },
+                { id: 4, type: 'peaking', freq: 7000, gain: -0.5, q: 2.0, enabled: true, channel: 'stereo' },
+            ],
+        },
+        ms_vocal_clarity: {
+            name: 'M/S Vocal Clarity',
+            bands: [
+                { id: 0, type: 'lowshelf', freq: 100, gain: -3.5, q: 0.6, enabled: true, channel: 'side' },
+                { id: 1, type: 'peaking', freq: 3500, gain: 2.0, q: 2.0, enabled: true, channel: 'mid' },
+                { id: 2, type: 'peaking', freq: 350, gain: -1.5, q: 1.2, enabled: true, channel: 'mid' },
+                { id: 3, type: 'peaking', freq: 3000, gain: -1.5, q: 1.5, enabled: true, channel: 'side' },
+                { id: 4, type: 'highshelf', freq: 12000, gain: 1.5, q: 0.5, enabled: true, channel: 'side' },
+                { id: 5, type: 'peaking', freq: 5000, gain: 1.0, q: 2.0, enabled: true, channel: 'mid' },
+            ],
+        },
+        ms_wide_stereo: {
+            name: 'M/S Wide Stereo',
+            bands: [
+                { id: 0, type: 'lowshelf', freq: 100, gain: -4.0, q: 0.6, enabled: true, channel: 'side' },
+                { id: 1, type: 'peaking', freq: 1200, gain: 1.5, q: 1.0, enabled: true, channel: 'side' },
+                { id: 2, type: 'highshelf', freq: 10000, gain: 2.0, q: 0.5, enabled: true, channel: 'side' },
+                { id: 3, type: 'peaking', freq: 5000, gain: 1.0, q: 1.2, enabled: true, channel: 'side' },
+                { id: 4, type: 'peaking', freq: 800, gain: -1.0, q: 1.0, enabled: true, channel: 'mid' },
+                { id: 5, type: 'lowshelf', freq: 60, gain: 1.0, q: 0.7, enabled: true, channel: 'mid' },
+            ],
+        },
+        ms_mono_bass: {
+            name: 'M/S Mono Bass',
+            bands: [
+                { id: 0, type: 'lowshelf', freq: 120, gain: -5.0, q: 0.5, enabled: true, channel: 'side' },
+                { id: 1, type: 'peaking', freq: 60, gain: 2.5, q: 0.7, enabled: true, channel: 'mid' },
+                { id: 2, type: 'peaking', freq: 120, gain: 1.0, q: 1.2, enabled: true, channel: 'mid' },
+                { id: 3, type: 'peaking', freq: 400, gain: 1.0, q: 0.8, enabled: true, channel: 'side' },
+                { id: 4, type: 'highshelf', freq: 10000, gain: 1.0, q: 0.7, enabled: true, channel: 'stereo' },
+            ],
+        },
+        ms_master_polish: {
+            name: 'M/S Master Polish',
+            bands: [
+                { id: 0, type: 'lowshelf', freq: 100, gain: -3.5, q: 0.5, enabled: true, channel: 'side' },
+                { id: 1, type: 'peaking', freq: 60, gain: 1.5, q: 0.7, enabled: true, channel: 'mid' },
+                { id: 2, type: 'peaking', freq: 350, gain: -1.0, q: 1.2, enabled: true, channel: 'mid' },
+                { id: 3, type: 'peaking', freq: 3000, gain: 1.5, q: 2.0, enabled: true, channel: 'mid' },
+                { id: 4, type: 'peaking', freq: 3000, gain: -1.0, q: 1.5, enabled: true, channel: 'side' },
+                { id: 5, type: 'highshelf', freq: 12000, gain: 2.0, q: 0.5, enabled: true, channel: 'side' },
+                { id: 6, type: 'peaking', freq: 7000, gain: -0.5, q: 2.0, enabled: true, channel: 'stereo' },
+                { id: 7, type: 'peaking', freq: 500, gain: -0.5, q: 0.8, enabled: true, channel: 'mid' },
+            ],
+        },
+        ms_rock_master: {
+            name: 'M/S Rock Master',
+            bands: [
+                { id: 0, type: 'lowshelf', freq: 100, gain: -4.0, q: 0.5, enabled: true, channel: 'side' },
+                { id: 1, type: 'peaking', freq: 3500, gain: -2.5, q: 2.0, enabled: true, channel: 'side' },
+                { id: 2, type: 'peaking', freq: 2500, gain: 1.5, q: 1.8, enabled: true, channel: 'mid' },
+                { id: 3, type: 'peaking', freq: 60, gain: 1.5, q: 0.7, enabled: true, channel: 'mid' },
+                { id: 4, type: 'highshelf', freq: 10000, gain: 1.5, q: 0.5, enabled: true, channel: 'side' },
+                { id: 5, type: 'peaking', freq: 400, gain: -1.0, q: 1.0, enabled: true, channel: 'mid' },
+                { id: 6, type: 'peaking', freq: 800, gain: 1.0, q: 1.0, enabled: true, channel: 'side' },
+            ],
+        },
+        ms_hiphop: {
+            name: 'M/S Hip-Hop',
+            bands: [
+                { id: 0, type: 'lowshelf', freq: 60, gain: 2.5, q: 0.5, enabled: true, channel: 'mid' },
+                { id: 1, type: 'lowshelf', freq: 100, gain: -4.5, q: 0.5, enabled: true, channel: 'side' },
+                { id: 2, type: 'peaking', freq: 3500, gain: 1.5, q: 2.0, enabled: true, channel: 'mid' },
+                { id: 3, type: 'peaking', freq: 7000, gain: 1.5, q: 1.0, enabled: true, channel: 'side' },
+                { id: 4, type: 'highshelf', freq: 12000, gain: 1.5, q: 0.5, enabled: true, channel: 'side' },
+                { id: 5, type: 'peaking', freq: 300, gain: -1.0, q: 1.0, enabled: true, channel: 'mid' },
+                { id: 6, type: 'peaking', freq: 500, gain: -0.5, q: 0.8, enabled: true, channel: 'mid' },
+            ],
+        },
+    };
+
     const parametricPresetSelect = document.getElementById('parametric-preset-select');
     if (parametricPresetSelect) {
         parametricPresetSelect.addEventListener('change', () => {
             const presetKey = parametricPresetSelect.value;
             if (!presetKey) return; // "Custom" selected
 
+            // Check for M/S preset first (replaces entire band array)
+            const msPreset = MS_PRESETS[presetKey];
+            if (msPreset) {
+                parametricBands = msPreset.bands.map((b) => ({ ...b }));
+                setActiveBands(parametricBands);
+                applyBandsToAudio(parametricBands);
+                renderBandControls(parametricBands);
+                computeCorrectedCurve();
+                drawAutoEQGraph();
+                return;
+            }
+
+            // Standard gain-only preset
             ensureParametricBands();
             const bandCount = parametricBands.length;
             const presets = getPresetsForBandCount(bandCount);
@@ -3287,6 +4428,8 @@ export async function initializeSettings(scrobbler, player, api, ui) {
 
             parametricBands.forEach((band, i) => {
                 band.gain = preset.gains[i] || 0;
+                band.channel = 'stereo';
+                band.type = 'peaking';
             });
 
             applyBandsToAudio(parametricBands);
@@ -4354,7 +5497,15 @@ export async function initializeSettings(scrobbler, player, api, ui) {
                 setActiveBands(bands);
             }
             if (bands.length >= 32) return;
-            bands.push({ id: bands.length, type: 'peaking', freq: 1000, gain: 0, q: 1.0, enabled: true });
+            bands.push({
+                id: bands.length,
+                type: 'peaking',
+                freq: 1000,
+                gain: 0,
+                q: 1.0,
+                enabled: true,
+                channel: 'stereo',
+            });
             applyBandsToAudio(bands);
             renderBandControls(bands);
             computeCorrectedCurve();
@@ -4400,7 +5551,15 @@ export async function initializeSettings(scrobbler, player, api, ui) {
             equalizerSettings.setEnabled(enabled);
             updateEQContainerVisibility(enabled);
 
-            audioContextManager.toggleEQ(enabled);
+            if (currentMode === 'legacy') {
+                // Legacy mode uses graphic EQ chain
+                audioContextManager.isEQEnabled = false;
+                audioContextManager.toggleGraphicEQ(enabled);
+            } else {
+                // AutoEQ/Parametric/Speaker modes use parametric EQ chain
+                audioContextManager.toggleEQ(enabled);
+                audioContextManager.toggleGraphicEQ(false);
+            }
         });
     }
 
@@ -4515,7 +5674,7 @@ export async function initializeSettings(scrobbler, player, api, ui) {
 
     // Restore EQ mode on startup
     const savedEQMode = localStorage.getItem(EQ_MODE_KEY);
-    if (savedEQMode && ['autoeq', 'parametric', 'speaker'].includes(savedEQMode)) {
+    if (savedEQMode && ['autoeq', 'parametric', 'speaker', 'legacy'].includes(savedEQMode)) {
         setEQMode(savedEQMode);
     }
 
@@ -4561,6 +5720,15 @@ export async function initializeSettings(scrobbler, player, api, ui) {
         compactArtistToggle.checked = cardSettings.isCompactArtist();
         compactArtistToggle.addEventListener('change', (e) => {
             cardSettings.setCompactArtist(e.target.checked);
+        });
+    }
+
+    // Artist Banners Toggle
+    const artistBannersToggle = document.getElementById('artist-banners-toggle');
+    if (artistBannersToggle) {
+        artistBannersToggle.checked = artistBannerSettings.isEnabled();
+        artistBannersToggle.addEventListener('change', (e) => {
+            artistBannerSettings.setEnabled(e.target.checked);
         });
     }
 

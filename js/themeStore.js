@@ -416,7 +416,15 @@ export class ThemeStore {
                     const customUrl = urlMatch[1].trim().replace(/['"]/g, '');
                     console.log(`Applying custom font URL: ${customUrl}`);
 
-                    if (customUrl.match(/\.(css)$/i) || customUrl.includes('fonts.googleapis.com')) {
+                    let isGoogleFontsHost = false;
+                    try {
+                        const parsedUrl = new URL(customUrl, window.location.href);
+                        isGoogleFontsHost = parsedUrl.hostname === 'fonts.googleapis.com';
+                    } catch (_e) {
+                        isGoogleFontsHost = false;
+                    }
+
+                    if (customUrl.match(/\.(css)$/i) || isGoogleFontsHost) {
                         if (!link) {
                             link = document.createElement('link');
                             link.id = FONT_LINK_ID;
@@ -704,7 +712,7 @@ export class ThemeStore {
     --highlight: #3b82f6;
     --ring: #3b82f6;
     --radius: 8px;
-    --font-family: 'Inter', sans-serif;
+    --font-family: 'Inter', 'Noto Sans', 'Noto Sans SC', 'Noto Sans TC', 'Noto Sans HK', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans Hebrew', 'Noto Sans Arabic', 'Noto Sans Devanagari', 'Noto Sans Bengali', 'Noto Sans Thai', 'Noto Sans Tamil', 'Noto Sans Telugu', 'Noto Sans Gujarati', 'Noto Sans Kannada', 'Noto Sans Malayalam', 'Noto Sans Sinhala', 'Noto Sans Khmer', 'Noto Sans Lao', 'Noto Sans Myanmar', 'Noto Sans Georgian', 'Noto Sans Armenian', 'Noto Sans Ethiopic', system-ui, sans-serif;
     --font-size-scale: 100%;
 }`;
             this.updatePreview();

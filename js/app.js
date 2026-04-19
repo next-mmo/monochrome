@@ -35,28 +35,7 @@ import { openEditProfile } from './profile.js';
 import { ThemeStore } from './themeStore.js';
 import './commandPalette.js';
 import { initTracker } from './tracker.js';
-import {
-    initAnalytics,
-    trackSidebarNavigation,
-    trackCreatePlaylist,
-    trackCreateFolder,
-    trackImportJSPF,
-    trackImportCSV,
-    trackImportXSPF,
-    trackImportXML,
-    trackImportM3U,
-    trackSelectLocalFolder,
-    trackChangeLocalFolder,
-    trackOpenModal,
-    trackCloseModal,
-    trackKeyboardShortcut,
-    trackPwaUpdate,
-    trackDismissUpdate,
-    trackOpenFullscreenCover,
-    trackCloseFullscreenCover,
-    trackOpenLyrics,
-    trackCloseLyrics,
-} from './analytics.js';
+import { initAnalytics } from './analytics.js';
 import {
     parseCSV,
     parseJSPF,
@@ -124,6 +103,50 @@ async function loadDownloadsModule() {
         downloadsModule = await import('./downloads.js');
     }
     return downloadsModule;
+}
+
+async function fetchcontributors() {
+    try {
+        const response = await fetch('https://api.samidy.com/api/contributors');
+        if (!response.ok) return;
+        const data1 = await response.json();
+        if (!Array.isArray(data1)) return;
+
+        let data = data1.filter(
+            (user) => user.type !== 'Bot' && user.login !== 'edidealt' && user.login !== 'satanyahoo'
+        );
+
+        const edideaur = data.find((user) => user.login === 'edideaur');
+        if (edideaur) {
+            edideaur.contributions += data1.find((u) => u.login === 'edidealt')?.contributions || 0;
+            edideaur.contributions += data1.find((u) => u.login === 'satanyahoo')?.contributions || 0;
+        }
+
+        data.sort((a, b) => b.contributions - a.contributions);
+
+        const con = document.querySelector('.about-contributors');
+        if (!con) return;
+
+        data.forEach((user) => {
+            const userDIV = document.createElement('div');
+            userDIV.innerHTML = `
+            <a href="${user.html_url}" target="_blank">
+            <img src="${user.avatar_url}&s=50" alt="${user.login}" width="50" height="50" style="border-radius: 50%;" loading="lazy">
+            <span>${user.login}</span>
+            <span class="contrib">Contributions: ${user.contributions}</span>
+            </a>
+            `;
+            con.appendChild(userDIV);
+        });
+    } catch (e) {
+        const con = document.querySelector('.about-contributors-failed');
+        if (!con) return;
+        const userDIV = document.createElement('div');
+        userDIV.innerHTML = `
+        <h4 style="text-align: center; color: var(--muted-foreground);">Failed to Fetch Contributor List</h4>
+        `;
+        con.appendChild(userDIV);
+    }
 }
 
 async function loadMetadataModule() {
@@ -209,78 +232,68 @@ function initializeCasting(audioPlayer, castBtn) {
 function initializeKeyboardShortcuts(player, _audioPlayer) {
     const keyActionMap = {
         playPause: () => {
-            trackKeyboardShortcut('Space');
             player.handlePlayPause();
         },
         seekForward: () => {
-            trackKeyboardShortcut('Right');
             player.seekForward(10);
         },
         seekBackward: () => {
-            trackKeyboardShortcut('Left');
             player.seekBackward(10);
         },
         nextTrack: () => {
-            trackKeyboardShortcut('Shift+Right');
             player.playNext();
         },
         previousTrack: () => {
-            trackKeyboardShortcut('Shift+Left');
             player.playPrev();
         },
         volumeUp: () => {
-            trackKeyboardShortcut('Up');
             player.setVolume(player.userVolume + 0.1);
         },
         volumeDown: () => {
-            trackKeyboardShortcut('Down');
             player.setVolume(player.userVolume - 0.1);
         },
         mute: () => {
-            trackKeyboardShortcut('M');
             const el = player.activeElement;
             el.muted = !el.muted;
         },
         shuffle: () => {
-            trackKeyboardShortcut('S');
             document.getElementById('shuffle-btn')?.click();
         },
         repeat: () => {
-            trackKeyboardShortcut('R');
             document.getElementById('repeat-btn')?.click();
         },
         queue: () => {
-            trackKeyboardShortcut('Q');
             document.getElementById('queue-btn')?.click();
         },
         lyrics: () => {
-            trackKeyboardShortcut('L');
+            const overlay = document.getElementById('fullscreen-cover-overlay');
+            const isFullscreenOpen = overlay && getComputedStyle(overlay).display !== 'none';
+
+            if (isFullscreenOpen && UIRenderer.instance?.toggleFullscreenLyrics(overlay)) {
+                return;
+            }
+
             document.getElementById('toggle-lyrics-btn')?.click();
         },
         search: () => {
-            trackKeyboardShortcut('/');
             document.getElementById('search-input')?.focus();
         },
         escape: () => {
-            trackKeyboardShortcut('Escape');
             document.getElementById('search-input')?.blur();
             sidePanelManager.close();
             clearLyricsPanelSync(player.activeElement, sidePanelManager.panel);
         },
         visualizerNext: () => {
-            trackKeyboardShortcut('VisualizerNext');
             if (UIRenderer.instance.visualizer?.presets?.['butterchurn']) {
                 UIRenderer.instance.visualizer.presets['butterchurn'].nextPreset();
             }
         },
         visualizerPrev: () => {
-            trackKeyboardShortcut('VisualizerPrev');
             if (UIRenderer.instance.visualizer?.presets?.['butterchurn']) {
                 UIRenderer.instance.visualizer.presets['butterchurn'].prevPreset();
             }
         },
         visualizerCycle: () => {
-            trackKeyboardShortcut('VisualizerCycle');
             if (UIRenderer.instance.visualizer?.presets?.['butterchurn']) {
                 UIRenderer.instance.visualizer.presets['butterchurn'].toggleCycle();
             }
@@ -315,6 +328,19 @@ function initializeKeyboardShortcuts(player, _audioPlayer) {
             }
         }
     });
+}
+
+async function closeFullscreenOverlay() {
+    if (UIRenderer.instance?.dismissFullscreenCover) {
+        await UIRenderer.instance.dismissFullscreenCover({ animate: false });
+        return;
+    }
+
+    if (window.location.hash === '#fullscreen') {
+        window.history.back();
+    } else {
+        UIRenderer.instance?.closeFullscreenCover();
+    }
 }
 
 function showOfflineNotification() {
@@ -402,18 +428,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Initialize analytics
     initAnalytics();
 
-    // Set version from config.js
-    const aboutVersion = document.getElementById('about-version');
-    if (aboutVersion && typeof APP_VERSION !== 'undefined') {
-        aboutVersion.textContent = `v${APP_VERSION}`;
-    }
-
-    // Set version in header badge
-    const headerVersionBadge = document.getElementById('header-version-badge');
-    if (headerVersionBadge && typeof APP_VERSION !== 'undefined') {
-        headerVersionBadge.textContent = `v${APP_VERSION}`;
-    }
-
     // Populate commit info
     {
         const repo = 'https://github.com/monochrome-music/monochrome';
@@ -453,35 +467,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const audioPlayer = document.getElementById('audio-player');
 
     // i love ios and macos!!!! webkit fucking SUCKS BULLSHIT sorry ios/macos heads yall getting lossless only playback
-    // Use isIos from platform-detection (set before UA spoof in index.html) so detection works on real iOS.
-    if (isIos || isSafari) {
-        const qualitySelect = document.getElementById('streaming-quality-setting');
-        const downloadQualitySelect = document.getElementById('download-quality-setting');
-
-        const removeHiRes = (select) => {
-            if (!select) return;
-            const option = select.querySelector('option[value="HI_RES_LOSSLESS"]');
-            if (option) option.remove();
-        };
-
-        removeHiRes(qualitySelect);
-        removeHiRes(downloadQualitySelect);
-
-        if (isIos) {
-            document.querySelector('#hi-res-download-warning').style.display = '';
-        }
-
-        const currentQualitySetting = localStorage.getItem('playback-quality');
-        if (!currentQualitySetting || currentQualitySetting === 'HI_RES_LOSSLESS') {
-            localStorage.setItem('playback-quality', 'LOSSLESS');
-        }
-    }
-
     const currentQuality = localStorage.getItem('playback-quality') || 'HI_RES_LOSSLESS';
     await Player.initialize(audioPlayer, MusicAPI.instance, currentQuality);
 
     // Initialize tracker
     initTracker().catch(console.error);
+
+    await fetchcontributors();
     const castBtn = document.getElementById('cast-btn');
     initializeCasting(audioPlayer, castBtn);
 
@@ -497,7 +489,7 @@ document.addEventListener('DOMContentLoaded', async () => {
      *   visited the local tab yet).
      */
     async function scanLocalMediaFolder(onlyIfAlreadyScanned = false) {
-        // Skip the scan if the user has never visited the local tab – they'll
+        // Skip the scan if the user has never visited the local tab - they'll
         // get a fresh scan when they navigate there for the first time.
         if (onlyIfAlreadyScanned && !window.localFilesCache) return;
 
@@ -630,16 +622,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Render pinned items
     await UIRenderer.instance.renderPinnedItems();
 
-    // Initialize offline badge count
-    import('./offline.js').then(({ getOfflineTrackCount }) => {
-        getOfflineTrackCount().then(count => {
-            const badge = document.getElementById('offline-count-badge');
-            if (badge) {
-                badge.textContent = count;
-                badge.style.display = count > 0 ? 'inline-flex' : 'none';
-            }
-        });
-    });
     // Load settings module and initialize
     const { initializeSettings } = await loadSettingsModule();
     await initializeSettings(scrobbler, Player.instance, MusicAPI.instance, UIRenderer.instance);
@@ -650,12 +632,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const href = link.getAttribute('href');
             if (href && !href.startsWith('http')) {
                 const item = link.querySelector('span')?.textContent || href;
-                trackSidebarNavigation(item);
             }
         });
     });
 
-    initializePlayerEvents(Player.instance, audioPlayer, scrobbler, UIRenderer.instance);
+    await initializePlayerEvents(Player.instance, audioPlayer, scrobbler, UIRenderer.instance);
     initializeTrackInteractions(
         Player.instance,
         MusicAPI.instance,
@@ -685,18 +666,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (mode === 'lyrics') {
             const isActive = sidePanelManager.isActive('lyrics');
-
-            if (isActive) {
-                trackCloseLyrics(Player.instance.currentTrack);
-            } else {
-                trackOpenLyrics(Player.instance.currentTrack);
-            }
         } else if (mode === 'cover') {
             const overlay = document.getElementById('fullscreen-cover-overlay');
             if (overlay && overlay.style.display === 'flex') {
-                trackCloseFullscreenCover();
             } else {
-                trackOpenFullscreenCover(Player.instance.currentTrack);
             }
         }
 
@@ -712,11 +685,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else if (mode === 'cover') {
             const overlay = document.getElementById('fullscreen-cover-overlay');
             if (overlay && overlay.style.display === 'flex') {
-                if (window.location.hash.startsWith('#fullscreen')) {
-                    window.history.back();
-                } else {
-                    UIRenderer.instance.closeFullscreenCover();
-                }
+                await closeFullscreenOverlay();
             } else {
                 const nextTrack = Player.instance.getNextTrack();
                 UIRenderer.instance.showFullscreenCover(
@@ -740,13 +709,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (shareBtn) shareBtn.style.display = e.target.checked ? 'flex' : 'none';
     });
 
-    document.getElementById('close-fullscreen-cover-btn')?.addEventListener('click', () => {
-        trackCloseFullscreenCover();
-        if (window.location.hash.startsWith('#fullscreen')) {
-            window.history.back();
-        } else {
-            UIRenderer.instance.closeFullscreenCover();
-        }
+    document.getElementById('close-fullscreen-cover-btn')?.addEventListener('click', async () => {
+        await closeFullscreenOverlay();
     });
 
     document.getElementById('fullscreen-cover-overlay')?.addEventListener('click', (e) => {
@@ -755,27 +719,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         const isOnCoverImage = e.target.closest('#fullscreen-cover-image') || e.target.id === 'fullscreen-cover-image';
         if (!isOnCoverImage) return;
 
+        const action = fullscreenCoverClickSettings.getAction();
         const overlay = document.getElementById('fullscreen-cover-overlay');
         const playerInstance = Player.instance;
 
-        // In radio mode, cover image click only toggles play/pause
-        if (overlay?.classList.contains('radio-mode')) {
-            if (playerInstance) {
-                playerInstance.handlePlayPause();
-                overlay.classList.toggle('radio-paused', playerInstance.activeElement.paused);
-            }
-            return;
-        }
-
-        const action = fullscreenCoverClickSettings.getAction();
-
         switch (action) {
             case 'exit':
-                if (window.location.hash.startsWith('#fullscreen')) {
-                    window.history.back();
-                } else {
-                    UIRenderer.instance.closeFullscreenCover();
-                }
+                closeFullscreenOverlay();
                 break;
             case 'hide-ui':
                 if (overlay) {
@@ -817,11 +767,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             case 'nothing':
                 break;
             default:
-                if (window.location.hash.startsWith('#fullscreen')) {
-                    window.history.back();
-                } else {
-                    UIRenderer.instance.closeFullscreenCover();
-                }
+                closeFullscreenOverlay();
         }
     });
 
@@ -1040,20 +986,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    document.getElementById('save-offline-btn')?.addEventListener('click', async () => {
-        if (player.currentTrack && !player.currentTrack.isLocal) {
-            await handleTrackAction('save-offline', player.currentTrack, player, api, lyricsManager, 'track', ui);
-            ui.setCurrentTrack(player.currentTrack);
-        }
-    });
-
-    document.getElementById('mobile-save-offline-btn')?.addEventListener('click', async () => {
-        if (player.currentTrack && !player.currentTrack.isLocal) {
-            await handleTrackAction('save-offline', player.currentTrack, player, api, lyricsManager, 'track', ui);
-            ui.setCurrentTrack(player.currentTrack);
-        }
-    });
-
     // Auto-update lyrics when track changes
     let previousTrackId = null;
     audioPlayer.addEventListener('play', async () => {
@@ -1131,6 +1063,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     });
 
                     Player.instance.setQueue(sortedTracks, 0);
+                    Player.instance.enableAutoplay();
                     const shuffleBtn = document.getElementById('shuffle-btn');
                     if (shuffleBtn) shuffleBtn.classList.remove('active');
                     Player.instance.shuffleActive = false;
@@ -1162,6 +1095,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (tracks && tracks.length > 0) {
                     const shuffledTracks = [...tracks].sort(() => Math.random() - 0.5);
                     Player.instance.setQueue(shuffledTracks, 0);
+                    Player.instance.enableAutoplay();
                     const shuffleBtn = document.getElementById('shuffle-btn');
                     if (shuffleBtn) shuffleBtn.classList.remove('active');
                     Player.instance.shuffleActive = false;
@@ -1230,6 +1164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 const shuffledTracks = [...allTracks].sort(() => Math.random() - 0.5);
                 Player.instance.setQueue(shuffledTracks, 0);
+                Player.instance.enableAutoplay();
                 const shuffleBtn = document.getElementById('shuffle-btn');
                 if (shuffleBtn) shuffleBtn.classList.remove('active');
                 Player.instance.shuffleActive = false;
@@ -1328,7 +1263,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (e.target.closest('#create-playlist-btn') || e.target.closest('#library-create-playlist-card')) {
-            trackOpenModal('Create Playlist');
             const modal = document.getElementById('playlist-modal');
             document.getElementById('playlist-modal-title').textContent = 'Create Playlist';
             document.getElementById('playlist-name-input').value = '';
@@ -1382,7 +1316,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (e.target.closest('#create-folder-btn') || e.target.closest('#library-create-folder-card')) {
-            trackOpenModal('Create Folder');
             const modal = document.getElementById('folder-modal');
             document.getElementById('folder-name-input').value = '';
             document.getElementById('folder-cover-input').value = '';
@@ -1396,11 +1329,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if (name) {
                 const folder = await db.createFolder(name, cover);
-                trackCreateFolder(folder);
                 await syncManager.syncUserFolder(folder, 'create');
                 UIRenderer.instance.renderLibraryPage();
                 document.getElementById('folder-modal').classList.remove('active');
-                trackCloseModal('Create Folder');
             } else {
                 showNotification('Please enter a folder name.');
             }
@@ -1589,7 +1520,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                             }
 
                             console.log(`Imported ${tracks.length} tracks from YouTube`);
-                            trackImportCSV(name || 'Untitled', tracks.length, missingTracks.length);
 
                             if (missingTracks.length > 0) {
                                 setTimeout(() => {
@@ -1669,12 +1599,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 jspfPlaylist?.creator ||
                                 jspfPlaylist?.extension?.['https://musicbrainz.org/doc/jspf#playlist']?.creator ||
                                 'unknown';
-                            trackImportJSPF(
-                                name || jspfPlaylist?.title || 'Untitled',
-                                tracks.length,
-                                missingTracks.length,
-                                jspfCreator
-                            );
 
                             if (missingTracks.length > 0) {
                                 setTimeout(() => {
@@ -1788,8 +1712,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                             }
                             console.log(`Imported ${tracks.length} tracks from CSV`);
 
-                            trackImportCSV(name || 'Untitled', tracks.length, missingTracks.length);
-
                             if (missingTracks.length > 0) {
                                 setTimeout(() => {
                                     showMissingTracksNotification(missingTracks, name || 'Untitled');
@@ -1846,8 +1768,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                                 return;
                             }
                             console.log(`Imported ${tracks.length} tracks from XSPF`);
-
-                            trackImportXSPF(name || 'Untitled', tracks.length, missingTracks.length);
 
                             if (missingTracks.length > 0) {
                                 setTimeout(() => {
@@ -1906,8 +1826,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                             }
                             console.log(`Imported ${tracks.length} tracks from XML`);
 
-                            trackImportXML(name || 'Untitled', tracks.length, missingTracks.length);
-
                             if (missingTracks.length > 0) {
                                 setTimeout(() => {
                                     showMissingTracksNotification(missingTracks, name || 'Untitled');
@@ -1965,8 +1883,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                             }
                             console.log(`Imported ${tracks.length} tracks from M3U`);
 
-                            trackImportM3U(name || 'Untitled', tracks.length, missingTracks.length);
-
                             if (missingTracks.length > 0) {
                                 setTimeout(() => {
                                     showMissingTracksNotification(missingTracks, name || 'Untitled');
@@ -1998,10 +1914,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                         // Update DB again with isPublic flag
                         await db.performTransaction('user_playlists', 'readwrite', (store) => store.put(playlist));
                         await syncManager.syncUserPlaylist(playlist, 'create');
-                        trackCreatePlaylist(playlist, importSource);
                         UIRenderer.instance.renderLibraryPage();
                         modal.classList.remove('active');
-                        trackCloseModal('Create Playlist');
                     });
                 }
             } else {
@@ -2503,9 +2417,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 });
 
                 await db.saveSetting('local_folder_handle', handle);
-                if (isChange) {
-                    trackChangeLocalFolder();
-                }
 
                 const btn = document.getElementById('select-local-folder-btn');
                 const btnText = document.getElementById('select-local-folder-text');
@@ -2516,7 +2427,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 const tracks = scanLocalMediaFolder(true);
-                trackSelectLocalFolder(tracks?.length ?? 0);
                 UIRenderer.instance.renderLibraryPage();
             } catch (err) {
                 if (err.name !== 'AbortError') {
@@ -2640,7 +2550,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const overlay = document.getElementById('fullscreen-cover-overlay');
         const isFullscreenOpen = overlay && getComputedStyle(overlay).display === 'flex';
 
-        if (isFullscreenOpen && !window.location.hash.startsWith('#fullscreen')) {
+        if (isFullscreenOpen && window.location.hash !== '#fullscreen') {
             UIRenderer.instance.closeFullscreenCover();
         }
 
@@ -2700,12 +2610,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         await disablePwaForAuthGate().catch(console.error);
     } else {
         const updateSW = registerSW({
-            onRegisteredSW(swUrl, registration) {
-                // Check for updates every 60 seconds
-                if (registration) {
-                    setInterval(() => {
-                        registration.update();
-                    }, 60 * 1000);
+            onNeedRefresh() {
+                if (pwaUpdateSettings.isAutoUpdateEnabled()) {
+                    // Auto-update: immediately activate the new service worker
+                    updateSW(true);
+                } else {
+                    // Show notification with Update button and dismiss option
+                    showUpdateNotification(() => {
+                        updateSW(true);
+                    });
                 }
             },
             onOfflineReady() {
@@ -2790,7 +2703,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         observer.observe(contextMenu, { attributes: true });
     }
 
-    // Header account button removed — version badge shown instead
+    const headerAccountBtn = document.getElementById('header-account-btn');
+    const headerAccountDropdown = document.getElementById('header-account-dropdown');
+    const headerAccountImg = document.getElementById('header-account-img');
+    const headerAccountIcon = document.getElementById('header-account-icon');
+
     // Temporarily disable accounts - show popup
     const isAccountsDisabled = false;
 
@@ -2801,9 +2718,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             headerAccountBtn.title = 'Accounts temporarily unavailable';
             headerAccountBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                alert(
-                    "We're moving authentication and data storing systems.\n\nAccounts, profiles, playlists, and community themes will not work during this period (approximately 2 days).\n\nYou will need to re-login after the migration is complete."
-                );
+                alert('.');
             });
         } else {
             headerAccountBtn.addEventListener('click', async (e) => {
@@ -2896,7 +2811,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (user) {
                 const data = await syncManager.getUserData();
                 if (data && data.profile && data.profile.avatar_url) {
-                    headerAccountImg.src = data.profile.avatar_url;
+                    headerAccountImg.src = data.profile.avatar_url + '&s=100';
                     headerAccountImg.style.display = 'block';
                     headerAccountIcon.style.display = 'none';
                     return;
@@ -2942,7 +2857,6 @@ function showUpdateNotification(updateCallback) {
     });
 
     document.getElementById('dismiss-update-btn').addEventListener('click', () => {
-        trackDismissUpdate();
         notification.remove();
     });
 }

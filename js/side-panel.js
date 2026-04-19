@@ -1,5 +1,3 @@
-import { trackCloseSidePanel, trackCloseQueue, trackCloseLyrics } from './analytics.js';
-
 export class SidePanelManager {
     constructor() {
         this.panel = document.getElementById('side-panel');
@@ -13,6 +11,17 @@ export class SidePanelManager {
         if (this.resizerElement) {
             this.initResizer();
         }
+    }
+
+    emitChange() {
+        window.dispatchEvent(
+            new CustomEvent('side-panel-changed', {
+                detail: {
+                    active: this.panel.classList.contains('active'),
+                    view: this.currentView,
+                },
+            })
+        );
     }
 
     initResizer() {
@@ -86,25 +95,21 @@ export class SidePanelManager {
         if (renderContentCallback) renderContentCallback(this.contentElement);
 
         this.panel.classList.add('active');
+        this.emitChange();
     }
 
     close() {
         // Track side panel close
         if (this.currentView) {
-            trackCloseSidePanel();
-            if (this.currentView === 'queue') {
-                trackCloseQueue();
-            } else if (this.currentView === 'lyrics') {
+            if (this.currentView === 'lyrics') {
                 // Get current track from audio player context
                 const audioPlayer = document.getElementById('audio-player');
-                if (audioPlayer && audioPlayer._currentTrack) {
-                    trackCloseLyrics(audioPlayer._currentTrack);
-                }
             }
         }
 
         this.panel.classList.remove('active');
         this.currentView = null;
+        this.emitChange();
         // Optionally clear content after transition
         setTimeout(() => {
             if (!this.panel.classList.contains('active')) {

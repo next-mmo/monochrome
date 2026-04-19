@@ -1,7 +1,7 @@
 {
     "name": "monochrome",
     "type": "module",
-    "version": "2.5.0",
+    "version": "2.5.1",
     "description": "[<img src=\"https://github.com/monochrome-music/monochrome/blob/main/assets/512.png?raw=true\" alt=\"Monochrome Logo\">](https://monochrome.tf)",
     "scripts": {
         "dev": "vite",
@@ -17,15 +17,19 @@
         "lint:css": "stylelint \"**/*.css\"",
         "lint:html": "htmlhint \"**/*.html\" --ignore=\"dist/**,legacy/**,node_modules/**\"",
         "lint": "bun run lint:js && bun run lint:css && bun run lint:html",
-        "format": "prettier --write ."
+        "format": "prettier --write .",
+        "lhci": "lhci",
+        "lhci:autorun": "npm run build && lhci autorun"
     },
     "repository": {
         "type": "git",
         "url": "git+https://github.com/monochrome-music/monochrome.git"
     },
-    "keywords": [],
+    "keywords": [
+        "music"
+    ],
     "author": "",
-    "license": "ISC",
+    "license": "Apache-2.0",
     "bugs": {
         "url": "https://github.com/monochrome-music/monochrome/issues"
     },
@@ -33,6 +37,7 @@
     "devDependencies": {
         "@capacitor/assets": "^3.0.5",
         "@capacitor/cli": "^8.2.0",
+        "@lhci/cli": "^0.14.0",
         "@testing-library/dom": "^10.4.1",
         "@types/node": "^25.3.5",
         "@vitest/browser-playwright": "^4.1.2",
@@ -47,13 +52,15 @@
         "stylelint": "^17.6.0",
         "stylelint-config-standard": "^39.0.1",
         "stylelint-config-standard-scss": "^16.0.0",
+        "terser": "^5.46.1",
         "typescript": "^5.9.3",
         "vite": "^7.3.1",
         "vite-bundle-visualizer": "^1.2.1",
+        "vite-plugin-purgecss": "^0.2.13",
         "vite-plugin-pwa": "^1.2.0"
     },
     "overrides": {
-        "sourcemap-codec": "npm:@jridgewell/sourcemap-codec@^1.4.14",
+        "sourcemap-codec": "^1.4.14",
         "source-map": "^0.7.4",
         "serialize-javascript": "^7.0.3"
     },
@@ -63,7 +70,8 @@
         "@capacitor/core": "^8.2.0",
         "@capacitor/haptics": "^8.0.1",
         "@capacitor/ios": "^8.2.0",
-        "@dantheman827/taglib-ts": "https://github.com/DanTheMan827/taglib-ts/archive/ebd0e369b706c127a280d4ad631977f8d12ff88f.tar.gz",
+        "@capgo/capacitor-media-session": "^8.0.19",
+        "@dantheman827/taglib-ts": "^0.1.5",
         "@ffmpeg/core": "^0.12.10",
         "@ffmpeg/ffmpeg": "^0.12.15",
         "@ffmpeg/util": "^0.12.2",
@@ -71,7 +79,7 @@
         "@svta/common-media-library": "^0.18.1",
         "@types/wicg-file-system-access": "^2023.10.7",
         "@typescript-eslint/eslint-plugin": "^8.57.2",
-        "@uimaxbai/am-lyrics": "^1.1.4",
+        "@uimaxbai/am-lyrics": "^1.2.8",
         "@vitest/web-worker": "^4.1.2",
         "appwrite": "^23.0.0",
         "butterchurn": "^2.6.7",
