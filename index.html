@@ -149,6 +149,13 @@
                 <li data-action="track-info" data-type-filter="track,video">Track info</li>
                 <li data-action="open-original-url" data-type-filter="track,video">Open original URL</li>
                 <li data-action="download">Download</li>
+                <li
+                    class="context-menu-item"
+                    id="context-save-offline"
+                    data-action="save-offline"
+                    data-label-save="Save Offline"
+                    data-label-remove="Remove from Offline"
+                >Save Offline</li>
                 <li class="separator"></li>
                 <li
                     data-action="block-track"
@@ -1688,6 +1695,27 @@
                                     <span>Home</span>
                                 </a>
                             </li>
+                            <li class="nav-item" id="sidebar-nav-offline">
+                                <a href="/offline">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="24"
+                                        height="24"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                    </svg>
+                                    <span>Offline</span>
+                                    <span id="offline-count-badge" class="offline-badge" style="display: none">0</span>
+                                </a>
+                            </li>
                             <li class="nav-item" id="sidebar-nav-library">
                                 <a href="/library">
                                     <use svg="!lucide/library.svg" size="24" />
@@ -2100,6 +2128,139 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <div id="page-offline" class="page">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem">
+                        <div>
+                            <h2 class="section-title" style="margin-bottom: 0.25rem">Offline Music</h2>
+                            <p id="offline-storage-info" style="font-size: 0.8rem; color: var(--muted-foreground); margin: 0">Loading...</p>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; align-items: center">
+                            <button id="offline-shuffle-btn" class="btn-secondary" title="Shuffle All" style="display: none; width: 36px; height: 36px; padding: 0; align-items: center; justify-content: center; border-radius: 50%">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="m18 14 4 4-4 4" />
+                                    <path d="m18 2 4 4-4 4" />
+                                    <path d="M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22" />
+                                    <path d="M2 6h1.972a4 4 0 0 1 3.6 2.2" />
+                                    <path d="M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45" />
+                                </svg>
+                            </button>
+                            <button id="offline-export-btn" class="btn-secondary" title="Export Offline Tracks" style="display: none; align-items: center; gap: 0.4rem">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="17 8 12 3 7 8" />
+                                    <line x1="12" y1="3" x2="12" y2="15" />
+                                </svg>
+                                <span>Export</span>
+                            </button>
+                            <button id="offline-import-btn" class="btn-secondary" title="Import Offline Tracks" style="display: flex; align-items: center; gap: 0.4rem">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                <span>Import</span>
+                            </button>
+                            <input type="file" id="offline-import-file" accept=".mcbackup" multiple style="display: none" />
+                            <button id="offline-clear-btn" class="btn-secondary" title="Remove All Offline Tracks" style="display: none; align-items: center; gap: 0.4rem">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 6h18" />
+                                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                                    <line x1="10" y1="11" x2="10" y2="17" />
+                                    <line x1="14" y1="11" x2="14" y2="17" />
+                                </svg>
+                                <span>Clear All</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="offline-search-container" class="offline-search-row" style="display: none">
+                        <div class="track-list-search-container offline-search-field">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                class="search-icon"
+                            >
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <input
+                                type="search"
+                                id="offline-track-search-input"
+                                placeholder="Search tracks..."
+                                class="track-list-search-input"
+                                autocomplete="off"
+                                autocorrect="off"
+                                autocapitalize="off"
+                                spellcheck="false"
+                            />
+                            <button
+                                type="button"
+                                class="search-clear-btn btn-icon"
+                                title="Clear track search"
+                                style="display: none"
+                            >
+                                &times;
+                            </button>
+                        </div>
+                    </div>
+                    <div id="offline-artist-row" class="offline-artist-row" style="display: none">
+                        <div class="track-list-search-container offline-search-field">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="20"
+                                height="20"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                class="search-icon"
+                            >
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <input
+                                type="search"
+                                id="offline-artist-search-input"
+                                placeholder="Search artists..."
+                                class="track-list-search-input"
+                                autocomplete="off"
+                                autocorrect="off"
+                                autocapitalize="off"
+                                spellcheck="false"
+                            />
+                            <button
+                                type="button"
+                                class="search-clear-btn btn-icon"
+                                title="Clear artist search"
+                                style="display: none"
+                            >
+                                &times;
+                            </button>
+                        </div>
+                    </div>
+                    <div id="offline-empty-state" style="display: none; text-align: center; padding: 3rem 1rem">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--muted-foreground)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 1rem; opacity: 0.4">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        <h3 style="color: var(--foreground); margin-bottom: 0.5rem; font-weight: 600">No offline tracks yet</h3>
+                        <p style="color: var(--muted-foreground); font-size: 0.9rem; max-width: 400px; margin: 0 auto">Right-click or long-press any track and select <strong>"Save Offline"</strong> to download it for offline playback.</p>
+                    </div>
+                    <div id="offline-tracks-scroll" class="track-list" style="overflow-y: auto; max-height: calc(100dvh - 340px); min-height: 200px;">
+                        <div id="offline-tracks-container"></div>
                     </div>
                 </div>
 
@@ -3495,6 +3656,18 @@
                                         </div>
                                         <label class="toggle-switch">
                                             <input type="checkbox" id="sidebar-show-unreleased-toggle" checked />
+                                            <span class="slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="setting-item">
+                                        <div class="info">
+                                            <span class="label">Show Offline in Sidebar</span>
+                                            <span class="description"
+                                                >Display the Offline link in the sidebar navigation</span
+                                            >
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="sidebar-show-offline-toggle" checked />
                                             <span class="slider"></span>
                                         </label>
                                     </div>

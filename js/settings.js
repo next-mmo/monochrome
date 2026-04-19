@@ -6208,6 +6208,15 @@ export async function initializeSettings(scrobbler, player, api, ui) {
         });
     }
 
+    const sidebarShowOfflineToggle = document.getElementById('sidebar-show-offline-toggle');
+    if (sidebarShowOfflineToggle) {
+        sidebarShowOfflineToggle.checked = sidebarSectionSettings.shouldShowOffline();
+        sidebarShowOfflineToggle.addEventListener('change', (e) => {
+            sidebarSectionSettings.setShowOffline(e.target.checked);
+            sidebarSectionSettings.applySidebarVisibility();
+        });
+    }
+
     const sidebarShowDonateToggle = document.getElementById('sidebar-show-donate-toggle');
     if (sidebarShowDonateToggle) {
         sidebarShowDonateToggle.checked = sidebarSectionSettings.shouldShowDonate();

@@ -2698,6 +2698,503 @@ export class UIRenderer {
         }
     }
 
+    async renderOfflinePage() {
+        this.showPage('offline');
+
+        const { getAllOfflineTracks, getOfflineStorageUsed, getOfflineTrackCount, removeOfflineTrack, clearAllOfflineTracks, buildPlayableTrack, exportOfflineTracks, importOfflineTracks, markTracksBackedUp, getUnbackedUpCount } = await import('./offline.js');
+        const Clusterize = (await import('clusterize.js')).default;
+        // Inject minimal Clusterize CSS (skip full CSS to avoid max-height conflicts)
+        if (!document.getElementById('clusterize-style')) {
+            const style = document.createElement('style');
+            style.id = 'clusterize-style';
+            style.textContent = '.clusterize-extra-row{margin-top:0!important;margin-bottom:0!important}.clusterize-extra-row.clusterize-keep-parity{display:none}.clusterize-content{outline:0}.clusterize-no-data td{text-align:center}';
+            document.head.appendChild(style);
+        }
+
+        const container = document.getElementById('offline-tracks-container');
+        const scrollEl = document.getElementById('offline-tracks-scroll');
+        const emptyState = document.getElementById('offline-empty-state');
+        const storageInfo = document.getElementById('offline-storage-info');
+        const shuffleBtn = document.getElementById('offline-shuffle-btn');
+        const clearBtn = document.getElementById('offline-clear-btn');
+        const searchContainer = document.getElementById('offline-search-container');
+        const trackSearchInput = document.getElementById('offline-track-search-input');
+        const artistSearchInput = document.getElementById('offline-artist-search-input');
+        const artistRow = document.getElementById('offline-artist-row');
+        const exportBtn = document.getElementById('offline-export-btn');
+        const importBtn = document.getElementById('offline-import-btn');
+        const importFile = document.getElementById('offline-import-file');
+
+        const getOfflineArtistNames = (track) => {
+            const artistNames = Array.isArray(track?.artists)
+                ? track.artists.map((artist) => artist?.name).filter(Boolean)
+                : [];
+            const primaryArtistName = track?.artist?.name;
+            if (primaryArtistName && !artistNames.includes(primaryArtistName)) {
+                artistNames.unshift(primaryArtistName);
+            }
+            return artistNames.length > 0 ? artistNames : ['Unknown Artist'];
+        };
+
+
+        // Destroy previous Clusterize instance if exists
+        if (this._offlineClusterize) {
+            this._offlineClusterize.destroy(true);
+            this._offlineClusterize = null;
+        }
+
+        const formatBytes = (bytes) => {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        };
+
+        const setBackupButtonLabel = (button, idleLabel, activeLabel, progress = null) => {
+            const label = button?.querySelector('span');
+            if (!label) return;
+            if (!progress) {
+                label.textContent = idleLabel;
+                return;
+            }
+
+            const percent = Math.max(0, Math.min(100, progress.percent || 0));
+            label.textContent = `${activeLabel} ${percent}%`;
+        };
+
+        const render = async () => {
+            const entries = await getAllOfflineTracks();
+            const storageUsed = await getOfflineStorageUsed();
+
+            if (storageInfo) {
+                storageInfo.textContent = `${entries.length} track${entries.length !== 1 ? 's' : ''} • ${formatBytes(storageUsed)} used`;
+            }
+
+            if (entries.length === 0) {
+                if (container) container.innerHTML = '';
+                if (scrollEl) scrollEl.style.display = 'none';
+                if (emptyState) emptyState.style.display = 'block';
+                if (shuffleBtn) shuffleBtn.style.display = 'none';
+                if (clearBtn) clearBtn.style.display = 'none';
+                if (searchContainer) searchContainer.style.display = 'none';
+                if (artistRow) artistRow.style.display = 'none';
+                if (trackSearchInput) trackSearchInput.value = '';
+                if (artistSearchInput) artistSearchInput.value = '';
+                if (exportBtn) exportBtn.style.display = 'none';
+                this._offlineVisibleTracks = [];
+                if (this._offlineClusterize) {
+                    this._offlineClusterize.destroy(true);
+                    this._offlineClusterize = null;
+                }
+                return;
+            }
+
+            if (emptyState) emptyState.style.display = 'none';
+            if (scrollEl) scrollEl.style.display = '';
+            if (shuffleBtn) shuffleBtn.style.display = 'flex';
+            if (clearBtn) clearBtn.style.display = 'flex';
+            if (exportBtn) exportBtn.style.display = 'flex';
+            if (searchContainer) searchContainer.style.display = '';
+
+            // Clear search input on re-render
+            if (trackSearchInput) trackSearchInput.value = '';
+            if (artistSearchInput) artistSearchInput.value = '';
+
+            // Build playable tracks
+            const playableTracks = entries.map(entry => buildPlayableTrack(entry));
+
+            // Store tracks for search/play actions
+            this._offlinePlayableTracks = playableTracks;
+            this._offlineVisibleTracks = playableTracks;
+
+            // Populate artist autocomplete
+            this._offlineSelectedArtist = null;
+            this._offlineArtists = [];
+            this._offlineArtistCounts = {};
+            {
+                const artistCounts = {};
+                playableTracks.forEach(t => {
+                    const name = getOfflineArtistNames(t)[0];
+                    artistCounts[name] = (artistCounts[name] || 0) + 1;
+                });
+                const artists = Object.keys(artistCounts).sort((a, b) => a.localeCompare(b));
+                this._offlineArtists = artists;
+                this._offlineArtistCounts = artistCounts;
+
+                if (artists.length >= 1 && artistSearchInput) {
+                    if (artistRow) artistRow.style.display = '';
+                    this.setupSearchClearButton(artistSearchInput);
+
+                    // Create datalist for autocomplete suggestions
+                    let datalist = document.getElementById('offline-artist-datalist');
+                    if (!datalist) {
+                        datalist = document.createElement('datalist');
+                        datalist.id = 'offline-artist-datalist';
+                        artistSearchInput.parentElement.appendChild(datalist);
+                    }
+                    artistSearchInput.setAttribute('list', 'offline-artist-datalist');
+
+                    // Populate datalist options
+                    datalist.innerHTML = '';
+                    artists.forEach(name => {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        opt.label = `${name} (${artistCounts[name]})`;
+                        datalist.appendChild(opt);
+                    });
+
+                    const onArtistSearch = () => {
+                        const val = artistSearchInput.value.trim();
+                        const exactMatch = artists.find(a => a.toLowerCase() === val.toLowerCase());
+                        if (exactMatch) {
+                            this._offlineSelectedArtist = exactMatch;
+                        } else if (val === '') {
+                            this._offlineSelectedArtist = null;
+                        }
+                        applyFilters();
+                    };
+                    if (artistSearchInput._offlineSearchHandler) {
+                        artistSearchInput.removeEventListener('input', artistSearchInput._offlineSearchHandler);
+                    }
+                    artistSearchInput.addEventListener('input', onArtistSearch);
+                    artistSearchInput._offlineSearchHandler = onArtistSearch;
+                } else {
+                    if (artistRow) artistRow.style.display = 'none';
+                }
+            }
+
+            // Generate HTML rows for Clusterize
+            const allRows = playableTracks.map((track, i) => this.createTrackItemHTML(track, i, true));
+
+            // Combined filter function for search + artist
+            const applyFilters = () => {
+                const trackQuery = (trackSearchInput?.value || '').toLowerCase().trim();
+                const selectedArtist = this._offlineSelectedArtist;
+
+                const filtered = playableTracks.reduce((result, track, i) => {
+                    const artistNames = getOfflineArtistNames(track);
+                    const primaryArtistName = artistNames[0];
+
+                    // Artist filter
+                    if (selectedArtist && primaryArtistName !== selectedArtist) {
+                        return result;
+                    }
+
+                    // Track search
+                    if (trackQuery) {
+                        const title = (track.title || '').toLowerCase();
+                        if (!title.includes(trackQuery)) {
+                            return result;
+                        }
+                    }
+
+                    result.rows.push(allRows[i]);
+                    result.tracks.push(track);
+                    return result;
+                }, { rows: [], tracks: [] });
+
+                this._offlineVisibleTracks = filtered.tracks;
+                this._offlineClusterize?.update(filtered.rows.length > 0 ? filtered.rows : ['<div style="text-align:center;padding:2rem;color:var(--muted-foreground)">No matching tracks</div>']);
+            };
+
+            // Helper to attach remove buttons and like state to visible rows
+            const attachOfflineActions = () => {
+                if (!container) return;
+                container.querySelectorAll('.track-item').forEach((el) => {
+                    // Skip already processed items
+                    if (el.dataset.offlineProcessed) return;
+                    el.dataset.offlineProcessed = 'true';
+
+                    const trackId = el.dataset.trackId;
+                    if (!trackId) return;
+
+                    // Bind track data from our stored tracks
+                    const track = playableTracks.find(t => String(t.id) === String(trackId));
+                    if (track) {
+                        trackDataStore.set(el, track);
+                        this.updateLikeState(el, 'track', track.id);
+                    }
+
+                    // Add remove-from-offline button
+                    const actionsArea = el.querySelector('.track-item-actions') || el;
+                    const removeBtn = document.createElement('button');
+                    removeBtn.className = 'btn-icon offline-remove-btn';
+                    removeBtn.title = 'Remove from Offline';
+                    removeBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
+                    removeBtn.style.cssText = 'background: transparent; border: none; color: var(--muted-foreground); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; transition: color 0.2s;';
+                    removeBtn.addEventListener('mouseenter', () => { removeBtn.style.color = 'var(--destructive, #ef4444)'; });
+                    removeBtn.addEventListener('mouseleave', () => { removeBtn.style.color = 'var(--muted-foreground)'; });
+                    removeBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        await removeOfflineTrack(parseInt(trackId) || trackId);
+                        showNotification('Track removed from offline');
+                        render();
+                        // Update badge
+                        const count = await getOfflineTrackCount();
+                        const badge = document.getElementById('offline-count-badge');
+                        if (badge) {
+                            badge.textContent = count;
+                            badge.style.display = count > 0 ? 'inline-flex' : 'none';
+                        }
+                    });
+                    actionsArea.appendChild(removeBtn);
+                });
+            };
+
+            // Initialize or update Clusterize
+            if (this._offlineClusterize) {
+                this._offlineClusterize.update(allRows);
+                attachOfflineActions();
+            } else {
+                this._offlineClusterize = new Clusterize({
+                    rows: allRows,
+                    scrollId: 'offline-tracks-scroll',
+                    contentId: 'offline-tracks-container',
+                    rows_in_block: 30,
+                    blocks_in_cluster: 4,
+                    show_no_data_row: true,
+                    no_data_text: 'No offline tracks found.',
+                    tag: 'div',
+                    callbacks: {
+                        clusterChanged: () => {
+                            attachOfflineActions();
+                        }
+                    }
+                });
+                attachOfflineActions();
+            }
+
+            // Setup click handler for playing tracks (delegated on container)
+            if (!container._offlineClickBound) {
+                container.addEventListener('click', (e) => {
+                    const trackItem = e.target.closest('.track-item');
+                    if (!trackItem) return;
+                    // Don't play if clicked on a button
+                    if (e.target.closest('button')) return;
+
+                    const trackId = trackItem.dataset.trackId;
+                    const visibleTracks = this._offlineVisibleTracks || this._offlinePlayableTracks;
+                    if (!trackId || !visibleTracks) return;
+
+                    const trackIndex = visibleTracks.findIndex(t => String(t.id) === String(trackId));
+                    if (trackIndex >= 0) {
+                        this.player.setQueue([...visibleTracks], trackIndex);
+                        this.player.playTrackFromQueue();
+                    }
+                });
+                container._offlineClickBound = true;
+            }
+
+            // Setup search filtering using combined filter (search + artist)
+            if (trackSearchInput) {
+                if (trackSearchInput._offlineSearchHandler) {
+                    trackSearchInput.removeEventListener('input', trackSearchInput._offlineSearchHandler);
+                }
+                this.setupSearchClearButton(trackSearchInput);
+                trackSearchInput.addEventListener('input', applyFilters);
+                trackSearchInput._offlineSearchHandler = applyFilters;
+            }
+
+        };
+
+        await render();
+
+        // Shuffle all
+        if (shuffleBtn) {
+            shuffleBtn.onclick = async () => {
+                const entries = await getAllOfflineTracks();
+                if (entries.length === 0) return;
+                const tracks = entries.map(e => buildPlayableTrack(e));
+                const shuffled = [...tracks].sort(() => Math.random() - 0.5);
+                this.player.shuffleActive = true;
+                this.player.setQueue(shuffled, 0);
+                this.player.playAtIndex(0);
+                showNotification(`Shuffling ${shuffled.length} offline tracks`);
+            };
+        }
+
+
+        // Clear all
+        if (clearBtn) {
+            clearBtn.onclick = async () => {
+                if (!confirm('Remove all offline tracks? This cannot be undone.')) return;
+                await clearAllOfflineTracks();
+                showNotification('All offline tracks removed');
+                render();
+                const badge = document.getElementById('offline-count-badge');
+                if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
+            };
+        }
+
+        // Export — incremental by default (only new tracks since last backup)
+        // Detect iOS/iPadOS — ALL browsers on iOS/iPadOS are WebKit under the hood,
+        // so <a download> never works reliably. Use Web Share or window.open.
+        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+            || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
+        const triggerBlobDownload = async (blob, filename) => {
+            // 1. Web Share API — best on mobile (iOS 15.4+, Android)
+            if (navigator.canShare) {
+                try {
+                    const file = new File([blob], filename, { type: 'application/octet-stream' });
+                    if (navigator.canShare({ files: [file] })) {
+                        await navigator.share({ files: [file] });
+                        return;
+                    }
+                } catch (err) {
+                    if (err.name === 'AbortError') return; // user cancelled share
+                    console.warn('Web Share failed, falling back to download:', err.message);
+                    // Fall through to platform-specific fallback
+                }
+            }
+
+            const url = URL.createObjectURL(blob);
+
+            // 2. iOS/iPadOS fallback — <a download> doesn't work on ANY iOS browser
+            //    (Chrome, Firefox, Safari — all WebKit). Open blob in new tab.
+            if (isIOS) {
+                window.open(url, '_blank');
+                // Keep blob URL alive for 2 min so the new tab can load
+                setTimeout(() => URL.revokeObjectURL(url), 120000);
+                return;
+            }
+
+            // 3. Standard download link (Android Chrome, desktop fallback)
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 120000); // 2 min — mobile downloads can be slow
+        };
+
+        if (exportBtn) {
+            // Show unbacked-up count on the button label
+            const updateExportLabel = async () => {
+                const newCount = await getUnbackedUpCount();
+                const label = exportBtn.querySelector('span');
+                if (label) {
+                    label.textContent = newCount > 0 ? `Export (${newCount} new)` : 'Export';
+                }
+            };
+            updateExportLabel();
+
+            exportBtn.onclick = async () => {
+                try {
+                    exportBtn.disabled = true;
+                    const newCount = await getUnbackedUpCount();
+                    const useIncremental = newCount > 0;
+                    const date = new Date().toISOString().slice(0, 10);
+                    setBackupButtonLabel(exportBtn, 'Export', 'Exporting', { percent: 0 });
+
+                    // Mobile: stream chunks one-at-a-time to avoid OOM
+                    const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+                        || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
+
+                    const onChunkReady = isMobileDevice ? async (blob, chunkIdx) => {
+                        setBackupButtonLabel(exportBtn, 'Export', `Saving part ${chunkIdx}`, { percent: 0 });
+                        await triggerBlobDownload(blob, `monochrome-offline-${date}-part${chunkIdx}.mcbackup`);
+                    } : null;
+
+                    const result = await exportOfflineTracks((progress) => {
+                        setBackupButtonLabel(exportBtn, 'Export', 'Exporting', progress);
+                    }, { incremental: useIncremental, onChunkReady });
+
+                    if (result.method === 'streamed') {
+                        let msg = `Exported ${result.count} tracks`;
+                        if (result.chunkCount > 1) msg += ` in ${result.chunkCount} files`;
+                        msg += ` (${formatBytes(result.totalBytes)})`;
+                        if (result.remaining > 0) {
+                            msg += `. ${result.remaining} remaining — tap Export again`;
+                        }
+                        showNotification(msg);
+                    } else if (result.method === 'chunked-download' && result.chunks) {
+                        for (let ci = 0; ci < result.chunks.length; ci++) {
+                            const chunk = result.chunks[ci];
+                            await triggerBlobDownload(chunk.blob, `monochrome-offline-${date}-part${ci + 1}.mcbackup`);
+                            if (ci < result.chunks.length - 1) {
+                                await new Promise(r => setTimeout(r, 1000));
+                            }
+                        }
+                        showNotification(`Offline backup split into ${result.chunks.length} files (${formatBytes(result.totalBytes)} total)`);
+                    } else if (result?.blob) {
+                        await triggerBlobDownload(result.blob, `monochrome-offline-${date}.mcbackup`);
+                        showNotification(`Offline backup ready (${formatBytes(result.totalBytes)})`);
+                    } else {
+                        showNotification(`Offline backup saved and verified (${formatBytes(result?.totalBytes || 0)})`);
+                    }
+
+                    // Mark exported tracks as backed up
+                    if (result.exportedKeys) {
+                        await markTracksBackedUp(result.exportedKeys);
+                    }
+                } catch (err) {
+                    if (err.message !== 'Export cancelled') {
+                        showNotification(err.message || 'Export failed');
+                    }
+                } finally {
+                    exportBtn.disabled = false;
+                    updateExportLabel();
+                }
+            };
+        }
+
+        // Import (supports selecting multiple .mcbackup files at once)
+        if (importBtn && importFile) {
+            importBtn.onclick = () => importFile.click();
+            importFile.onchange = async () => {
+                const files = [...(importFile.files || [])];
+                if (files.length === 0) return;
+                try {
+                    importBtn.disabled = true;
+                    let totalImported = 0;
+                    let totalSkipped = 0;
+
+                    for (let fi = 0; fi < files.length; fi++) {
+                        const label = files.length > 1
+                            ? `Importing ${fi + 1}/${files.length}`
+                            : 'Importing';
+                        setBackupButtonLabel(importBtn, 'Import', label, { percent: 0 });
+                        const result = await importOfflineTracks(files[fi], (progress) => {
+                            setBackupButtonLabel(importBtn, 'Import', label, progress);
+                        });
+                        totalImported += result.imported;
+                        totalSkipped += result.skipped;
+                    }
+
+                    let msg = `Imported ${totalImported} track${totalImported !== 1 ? 's' : ''}`;
+                    if (files.length > 1) msg += ` from ${files.length} files`;
+                    if (totalSkipped > 0) msg += `, ${totalSkipped} already existed`;
+                    showNotification(msg);
+                    render();
+                    // Update badge
+                    const count = await getOfflineTrackCount();
+                    const badge = document.getElementById('offline-count-badge');
+                    if (badge) {
+                        badge.textContent = count;
+                        badge.style.display = count > 0 ? 'inline-flex' : 'none';
+                    }
+                } catch (err) {
+                    showNotification(err.message || 'Import failed');
+                } finally {
+                    importBtn.disabled = false;
+                    setBackupButtonLabel(importBtn, 'Import', 'Importing');
+                    importFile.value = '';
+                }
+            };
+        }
+
+        // Listen for external changes
+        const handler = () => { if (this.currentPage === 'offline') render(); };
+        window.removeEventListener('offline-tracks-changed', handler);
+        window.addEventListener('offline-tracks-changed', handler);
+    }
+
     async renderHomePage() {
         if (this.renderLock) return;
         this.renderLock = true;

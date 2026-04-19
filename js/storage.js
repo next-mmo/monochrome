@@ -2424,6 +2424,7 @@ export const sidebarSectionSettings = {
     SHOW_LIBRARY_KEY: 'sidebar-show-library',
     SHOW_RECENT_KEY: 'sidebar-show-recent',
     SHOW_UNRELEASED_KEY: 'sidebar-show-unreleased',
+    SHOW_OFFLINE_KEY: 'sidebar-show-offline',
     SHOW_DONATE_KEY: 'sidebar-show-donate',
     SHOW_SETTINGS_KEY: 'sidebar-show-settings',
     SHOW_ABOUT_KEY: 'sidebar-show-about',
@@ -2432,6 +2433,7 @@ export const sidebarSectionSettings = {
     ORDER_KEY: 'sidebar-menu-order',
     DEFAULT_ORDER: [
         'sidebar-nav-home',
+        'sidebar-nav-offline',
         'sidebar-nav-library',
         'sidebar-nav-recent',
         'sidebar-nav-unreleased',
@@ -2498,6 +2500,19 @@ export const sidebarSectionSettings = {
 
     setShowUnreleased(enabled) {
         localStorage.setItem(this.SHOW_UNRELEASED_KEY, enabled ? 'true' : 'false');
+    },
+
+    shouldShowOffline() {
+        try {
+            const val = localStorage.getItem(this.SHOW_OFFLINE_KEY);
+            return val === null ? true : val === 'true';
+        } catch {
+            return true;
+        }
+    },
+
+    setShowOffline(enabled) {
+        localStorage.setItem(this.SHOW_OFFLINE_KEY, enabled ? 'true' : 'false');
     },
 
     shouldShowDonate() {
@@ -2568,8 +2583,20 @@ export const sidebarSectionSettings = {
         const baseOrder = this.DEFAULT_ORDER;
         const safeOrder = Array.isArray(order) ? order.filter((id) => baseOrder.includes(id)) : [];
         const uniqueOrder = [...new Set(safeOrder)];
-        const missing = baseOrder.filter((id) => !uniqueOrder.includes(id));
-        return [...uniqueOrder, ...missing];
+        let missing = baseOrder.filter((id) => !uniqueOrder.includes(id));
+        
+        let result = [...uniqueOrder];
+        
+        // Force offline below home if it was missing from the user's customized layout
+        if (missing.includes('sidebar-nav-offline')) {
+            const homeIndex = result.indexOf('sidebar-nav-home');
+            if (homeIndex !== -1) {
+                result.splice(homeIndex + 1, 0, 'sidebar-nav-offline');
+                missing = missing.filter(id => id !== 'sidebar-nav-offline');
+            }
+        }
+        
+        return [...result, ...missing];
     },
 
     getOrder() {
@@ -2619,6 +2646,7 @@ export const sidebarSectionSettings = {
             { id: 'sidebar-nav-library', check: this.shouldShowLibrary() },
             { id: 'sidebar-nav-recent', check: this.shouldShowRecent() },
             { id: 'sidebar-nav-unreleased', check: this.shouldShowUnreleased() },
+            { id: 'sidebar-nav-offline', check: this.shouldShowOffline() },
             { id: 'sidebar-nav-donate', check: this.shouldShowDonate() },
             { id: 'sidebar-nav-settings', check: this.shouldShowSettings() },
             { id: 'sidebar-nav-about-bottom', check: this.shouldShowAbout() },
