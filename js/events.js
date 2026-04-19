@@ -1360,25 +1360,28 @@ export async function handleTrackAction(
     } else if (action === 'download') {
         await downloadTrackWithMetadata(item, downloadQualitySettings.getQuality(), api, lyricsManager);
     } else if (action === 'save-offline') {
-        const { isTrackOffline, saveOfflineTrack, removeOfflineTrack, getOfflineTrackCount } = await import('./offline.js');
+        const { isTrackOffline, saveOfflineTrack, removeOfflineTrack, getOfflineTrackCount } =
+            await import('./offline.js');
         const alreadyOffline = await isTrackOffline(item.id);
         if (alreadyOffline) {
             await removeOfflineTrack(item.id);
             showNotification(`Removed from offline: ${item.title}`);
         } else {
             // Create a progress notification for offline saving
-            const container = document.getElementById('download-notifications') || (() => {
-                const c = document.createElement('div');
-                c.id = 'download-notifications';
-                document.body.appendChild(c);
-                return c;
-            })();
+            const container =
+                document.getElementById('download-notifications') ||
+                (() => {
+                    const c = document.createElement('div');
+                    c.id = 'download-notifications';
+                    document.body.appendChild(c);
+                    return c;
+                })();
 
             const taskEl = document.createElement('div');
             taskEl.className = 'download-task';
             const coverUrl = api.getCoverUrl(item.album?.cover);
             const trackTitle = item.title || 'Unknown';
-            const trackArtist = item.artists?.map(a => a.name).join(', ') || item.artist || '';
+            const trackArtist = item.artists?.map((a) => a.name).join(', ') || item.artist || '';
             taskEl.innerHTML = `
                 <div style="display: flex; align-items: start; gap: 0.75rem;">
                     <img src="${coverUrl}"
@@ -1429,7 +1432,9 @@ export async function handleTrackAction(
                     try {
                         const coverRes = await fetch(coverSrc);
                         if (coverRes.ok) coverBlob = await coverRes.blob();
-                    } catch { /* ignore cover fetch failure */ }
+                    } catch {
+                        /* ignore cover fetch failure */
+                    }
                 }
 
                 // Save to IndexedDB
@@ -2438,8 +2443,8 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
                     import('./offline.js').then(({ isTrackOffline }) => {
                         isTrackOffline(contextTrack.id).then((isOffline) => {
                             offlineBtn.textContent = isOffline
-                                ? (offlineBtn.dataset.labelRemove || 'Remove from Offline')
-                                : (offlineBtn.dataset.labelSave || 'Save Offline');
+                                ? offlineBtn.dataset.labelRemove || 'Remove from Offline'
+                                : offlineBtn.dataset.labelSave || 'Save Offline';
                         });
                     });
                 }

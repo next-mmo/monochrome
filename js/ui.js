@@ -2701,13 +2701,25 @@ export class UIRenderer {
     async renderOfflinePage() {
         this.showPage('offline');
 
-        const { getAllOfflineTracks, getOfflineStorageUsed, getOfflineTrackCount, removeOfflineTrack, clearAllOfflineTracks, buildPlayableTrack, exportOfflineTracks, importOfflineTracks, markTracksBackedUp, getUnbackedUpCount } = await import('./offline.js');
+        const {
+            getAllOfflineTracks,
+            getOfflineStorageUsed,
+            getOfflineTrackCount,
+            removeOfflineTrack,
+            clearAllOfflineTracks,
+            buildPlayableTrack,
+            exportOfflineTracks,
+            importOfflineTracks,
+            markTracksBackedUp,
+            getUnbackedUpCount,
+        } = await import('./offline.js');
         const Clusterize = (await import('clusterize.js')).default;
         // Inject minimal Clusterize CSS (skip full CSS to avoid max-height conflicts)
         if (!document.getElementById('clusterize-style')) {
             const style = document.createElement('style');
             style.id = 'clusterize-style';
-            style.textContent = '.clusterize-extra-row{margin-top:0!important;margin-bottom:0!important}.clusterize-extra-row.clusterize-keep-parity{display:none}.clusterize-content{outline:0}.clusterize-no-data td{text-align:center}';
+            style.textContent =
+                '.clusterize-extra-row{margin-top:0!important;margin-bottom:0!important}.clusterize-extra-row.clusterize-keep-parity{display:none}.clusterize-content{outline:0}.clusterize-no-data td{text-align:center}';
             document.head.appendChild(style);
         }
 
@@ -2735,7 +2747,6 @@ export class UIRenderer {
             }
             return artistNames.length > 0 ? artistNames : ['Unknown Artist'];
         };
-
 
         // Destroy previous Clusterize instance if exists
         if (this._offlineClusterize) {
@@ -2802,7 +2813,7 @@ export class UIRenderer {
             if (artistSearchInput) artistSearchInput.value = '';
 
             // Build playable tracks
-            const playableTracks = entries.map(entry => buildPlayableTrack(entry));
+            const playableTracks = entries.map((entry) => buildPlayableTrack(entry));
 
             // Store tracks for search/play actions
             this._offlinePlayableTracks = playableTracks;
@@ -2814,7 +2825,7 @@ export class UIRenderer {
             this._offlineArtistCounts = {};
             {
                 const artistCounts = {};
-                playableTracks.forEach(t => {
+                playableTracks.forEach((t) => {
                     const name = getOfflineArtistNames(t)[0];
                     artistCounts[name] = (artistCounts[name] || 0) + 1;
                 });
@@ -2837,7 +2848,7 @@ export class UIRenderer {
 
                     // Populate datalist options
                     datalist.innerHTML = '';
-                    artists.forEach(name => {
+                    artists.forEach((name) => {
                         const opt = document.createElement('option');
                         opt.value = name;
                         opt.label = `${name} (${artistCounts[name]})`;
@@ -2846,7 +2857,7 @@ export class UIRenderer {
 
                     const onArtistSearch = () => {
                         const val = artistSearchInput.value.trim();
-                        const exactMatch = artists.find(a => a.toLowerCase() === val.toLowerCase());
+                        const exactMatch = artists.find((a) => a.toLowerCase() === val.toLowerCase());
                         if (exactMatch) {
                             this._offlineSelectedArtist = exactMatch;
                         } else if (val === '') {
@@ -2872,30 +2883,39 @@ export class UIRenderer {
                 const trackQuery = (trackSearchInput?.value || '').toLowerCase().trim();
                 const selectedArtist = this._offlineSelectedArtist;
 
-                const filtered = playableTracks.reduce((result, track, i) => {
-                    const artistNames = getOfflineArtistNames(track);
-                    const primaryArtistName = artistNames[0];
+                const filtered = playableTracks.reduce(
+                    (result, track, i) => {
+                        const artistNames = getOfflineArtistNames(track);
+                        const primaryArtistName = artistNames[0];
 
-                    // Artist filter
-                    if (selectedArtist && primaryArtistName !== selectedArtist) {
-                        return result;
-                    }
-
-                    // Track search
-                    if (trackQuery) {
-                        const title = (track.title || '').toLowerCase();
-                        if (!title.includes(trackQuery)) {
+                        // Artist filter
+                        if (selectedArtist && primaryArtistName !== selectedArtist) {
                             return result;
                         }
-                    }
 
-                    result.rows.push(allRows[i]);
-                    result.tracks.push(track);
-                    return result;
-                }, { rows: [], tracks: [] });
+                        // Track search
+                        if (trackQuery) {
+                            const title = (track.title || '').toLowerCase();
+                            if (!title.includes(trackQuery)) {
+                                return result;
+                            }
+                        }
+
+                        result.rows.push(allRows[i]);
+                        result.tracks.push(track);
+                        return result;
+                    },
+                    { rows: [], tracks: [] }
+                );
 
                 this._offlineVisibleTracks = filtered.tracks;
-                this._offlineClusterize?.update(filtered.rows.length > 0 ? filtered.rows : ['<div style="text-align:center;padding:2rem;color:var(--muted-foreground)">No matching tracks</div>']);
+                this._offlineClusterize?.update(
+                    filtered.rows.length > 0
+                        ? filtered.rows
+                        : [
+                              '<div style="text-align:center;padding:2rem;color:var(--muted-foreground)">No matching tracks</div>',
+                          ]
+                );
             };
 
             // Helper to attach remove buttons and like state to visible rows
@@ -2910,7 +2930,7 @@ export class UIRenderer {
                     if (!trackId) return;
 
                     // Bind track data from our stored tracks
-                    const track = playableTracks.find(t => String(t.id) === String(trackId));
+                    const track = playableTracks.find((t) => String(t.id) === String(trackId));
                     if (track) {
                         trackDataStore.set(el, track);
                         this.updateLikeState(el, 'track', track.id);
@@ -2922,9 +2942,14 @@ export class UIRenderer {
                     removeBtn.className = 'btn-icon offline-remove-btn';
                     removeBtn.title = 'Remove from Offline';
                     removeBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>`;
-                    removeBtn.style.cssText = 'background: transparent; border: none; color: var(--muted-foreground); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; transition: color 0.2s;';
-                    removeBtn.addEventListener('mouseenter', () => { removeBtn.style.color = 'var(--destructive, #ef4444)'; });
-                    removeBtn.addEventListener('mouseleave', () => { removeBtn.style.color = 'var(--muted-foreground)'; });
+                    removeBtn.style.cssText =
+                        'background: transparent; border: none; color: var(--muted-foreground); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; transition: color 0.2s;';
+                    removeBtn.addEventListener('mouseenter', () => {
+                        removeBtn.style.color = 'var(--destructive, #ef4444)';
+                    });
+                    removeBtn.addEventListener('mouseleave', () => {
+                        removeBtn.style.color = 'var(--muted-foreground)';
+                    });
                     removeBtn.addEventListener('click', async (e) => {
                         e.stopPropagation();
                         await removeOfflineTrack(parseInt(trackId) || trackId);
@@ -2959,8 +2984,8 @@ export class UIRenderer {
                     callbacks: {
                         clusterChanged: () => {
                             attachOfflineActions();
-                        }
-                    }
+                        },
+                    },
                 });
                 attachOfflineActions();
             }
@@ -2977,7 +3002,7 @@ export class UIRenderer {
                     const visibleTracks = this._offlineVisibleTracks || this._offlinePlayableTracks;
                     if (!trackId || !visibleTracks) return;
 
-                    const trackIndex = visibleTracks.findIndex(t => String(t.id) === String(trackId));
+                    const trackIndex = visibleTracks.findIndex((t) => String(t.id) === String(trackId));
                     if (trackIndex >= 0) {
                         this.player.setQueue([...visibleTracks], trackIndex);
                         this.player.playTrackFromQueue();
@@ -2995,7 +3020,6 @@ export class UIRenderer {
                 trackSearchInput.addEventListener('input', applyFilters);
                 trackSearchInput._offlineSearchHandler = applyFilters;
             }
-
         };
 
         await render();
@@ -3005,7 +3029,7 @@ export class UIRenderer {
             shuffleBtn.onclick = async () => {
                 const entries = await getAllOfflineTracks();
                 if (entries.length === 0) return;
-                const tracks = entries.map(e => buildPlayableTrack(e));
+                const tracks = entries.map((e) => buildPlayableTrack(e));
                 const shuffled = [...tracks].sort(() => Math.random() - 0.5);
                 this.player.shuffleActive = true;
                 this.player.setQueue(shuffled, 0);
@@ -3013,7 +3037,6 @@ export class UIRenderer {
                 showNotification(`Shuffling ${shuffled.length} offline tracks`);
             };
         }
-
 
         // Clear all
         if (clearBtn) {
@@ -3023,15 +3046,19 @@ export class UIRenderer {
                 showNotification('All offline tracks removed');
                 render();
                 const badge = document.getElementById('offline-count-badge');
-                if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
+                if (badge) {
+                    badge.textContent = '0';
+                    badge.style.display = 'none';
+                }
             };
         }
 
         // Export — incremental by default (only new tracks since last backup)
         // Detect iOS/iPadOS — ALL browsers on iOS/iPadOS are WebKit under the hood,
         // so <a download> never works reliably. Use Web Share or window.open.
-        const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
-            || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+        const isIOS =
+            /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+            (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
         const triggerBlobDownload = async (blob, filename) => {
             // 1. Web Share API — best on mobile (iOS 15.4+, Android)
@@ -3093,17 +3120,23 @@ export class UIRenderer {
                     setBackupButtonLabel(exportBtn, 'Export', 'Exporting', { percent: 0 });
 
                     // Mobile: stream chunks one-at-a-time to avoid OOM
-                    const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
-                        || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
+                    const isMobileDevice =
+                        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+                        (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
 
-                    const onChunkReady = isMobileDevice ? async (blob, chunkIdx) => {
-                        setBackupButtonLabel(exportBtn, 'Export', `Saving part ${chunkIdx}`, { percent: 0 });
-                        await triggerBlobDownload(blob, `monochrome-offline-${date}-part${chunkIdx}.mcbackup`);
-                    } : null;
+                    const onChunkReady = isMobileDevice
+                        ? async (blob, chunkIdx) => {
+                              setBackupButtonLabel(exportBtn, 'Export', `Saving part ${chunkIdx}`, { percent: 0 });
+                              await triggerBlobDownload(blob, `monochrome-offline-${date}-part${chunkIdx}.mcbackup`);
+                          }
+                        : null;
 
-                    const result = await exportOfflineTracks((progress) => {
-                        setBackupButtonLabel(exportBtn, 'Export', 'Exporting', progress);
-                    }, { incremental: useIncremental, onChunkReady });
+                    const result = await exportOfflineTracks(
+                        (progress) => {
+                            setBackupButtonLabel(exportBtn, 'Export', 'Exporting', progress);
+                        },
+                        { incremental: useIncremental, onChunkReady }
+                    );
 
                     if (result.method === 'streamed') {
                         let msg = `Exported ${result.count} tracks`;
@@ -3118,10 +3151,12 @@ export class UIRenderer {
                             const chunk = result.chunks[ci];
                             await triggerBlobDownload(chunk.blob, `monochrome-offline-${date}-part${ci + 1}.mcbackup`);
                             if (ci < result.chunks.length - 1) {
-                                await new Promise(r => setTimeout(r, 1000));
+                                await new Promise((r) => setTimeout(r, 1000));
                             }
                         }
-                        showNotification(`Offline backup split into ${result.chunks.length} files (${formatBytes(result.totalBytes)} total)`);
+                        showNotification(
+                            `Offline backup split into ${result.chunks.length} files (${formatBytes(result.totalBytes)} total)`
+                        );
                     } else if (result?.blob) {
                         await triggerBlobDownload(result.blob, `monochrome-offline-${date}.mcbackup`);
                         showNotification(`Offline backup ready (${formatBytes(result.totalBytes)})`);
@@ -3156,9 +3191,7 @@ export class UIRenderer {
                     let totalSkipped = 0;
 
                     for (let fi = 0; fi < files.length; fi++) {
-                        const label = files.length > 1
-                            ? `Importing ${fi + 1}/${files.length}`
-                            : 'Importing';
+                        const label = files.length > 1 ? `Importing ${fi + 1}/${files.length}` : 'Importing';
                         setBackupButtonLabel(importBtn, 'Import', label, { percent: 0 });
                         const result = await importOfflineTracks(files[fi], (progress) => {
                             setBackupButtonLabel(importBtn, 'Import', label, progress);
@@ -3190,7 +3223,9 @@ export class UIRenderer {
         }
 
         // Listen for external changes
-        const handler = () => { if (this.currentPage === 'offline') render(); };
+        const handler = () => {
+            if (this.currentPage === 'offline') render();
+        };
         window.removeEventListener('offline-tracks-changed', handler);
         window.addEventListener('offline-tracks-changed', handler);
     }

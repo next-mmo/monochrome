@@ -4,7 +4,7 @@
 const DB_NAME = 'MonochromeOfflineDB';
 const DB_VERSION = 1;
 const STORE_TRACKS = 'offline_tracks'; // { id, metadata, audioBlob, coverBlob, savedAt }
-const BACKUP_MAGIC = 0x4D434241;
+const BACKUP_MAGIC = 0x4d434241;
 const BACKUP_VERSION = 1;
 const BACKUP_HEADER_BYTES = 12;
 const BACKUP_ENTRY_HEADER_BYTES = 12;
@@ -22,9 +22,10 @@ function emitBackupProgress(onProgress, progress) {
 
 function createBackupProgress(phase, processed, total, bytesProcessed = 0, totalBytes = 0) {
     const normalizedTotal = Math.max(total, 1);
-    const percent = totalBytes > 0
-        ? Math.min(100, Math.round((bytesProcessed / totalBytes) * 100))
-        : Math.min(100, Math.round((processed / normalizedTotal) * 100));
+    const percent =
+        totalBytes > 0
+            ? Math.min(100, Math.round((bytesProcessed / totalBytes) * 100))
+            : Math.min(100, Math.round((processed / normalizedTotal) * 100));
 
     return {
         phase,
@@ -37,11 +38,13 @@ function createBackupProgress(phase, processed, total, bytesProcessed = 0, total
 }
 
 function getSerializedBackupMetadata(entry, encoder) {
-    return encoder.encode(JSON.stringify({
-        id: entry.id,
-        metadata: entry.metadata,
-        savedAt: entry.savedAt,
-    }));
+    return encoder.encode(
+        JSON.stringify({
+            id: entry.id,
+            metadata: entry.metadata,
+            savedAt: entry.savedAt,
+        })
+    );
 }
 
 function getBackupEntrySize(metaBytes, audioSize, coverSize) {
@@ -54,7 +57,7 @@ function getBackupEntrySize(metaBytes, audioSize, coverSize) {
  */
 function getDataSize(data) {
     if (!data) return 0;
-    if (typeof data.size === 'number') return data.size;           // Blob
+    if (typeof data.size === 'number') return data.size; // Blob
     if (typeof data.byteLength === 'number') return data.byteLength; // ArrayBuffer / TypedArray
     return 0;
 }
@@ -105,7 +108,7 @@ async function openDB() {
  */
 export async function saveOfflineTrack(track, audioBlob, coverBlob = null) {
     const db = await openDB();
-    const artists = track.artists?.map(a => a.name).join(', ') || track.artist?.name || 'Unknown Artist';
+    const artists = track.artists?.map((a) => a.name).join(', ') || track.artist?.name || 'Unknown Artist';
 
     const entry = {
         id: track.id,
@@ -113,7 +116,7 @@ export async function saveOfflineTrack(track, audioBlob, coverBlob = null) {
             id: track.id,
             title: track.title || 'Unknown Title',
             artistName: artists,
-            artist: track.artist || (track.artists?.[0]) || { name: artists },
+            artist: track.artist || track.artists?.[0] || { name: artists },
             artists: track.artists || [{ name: artists }],
             albumTitle: track.album?.title || '',
             albumCover: track.album?.cover || null,
@@ -261,9 +264,7 @@ async function getUnbackedUpKeys() {
         const tx = db.transaction(STORE_TRACKS, 'readonly');
         const req = tx.objectStore(STORE_TRACKS).getAll();
         req.onsuccess = () => {
-            const unbacked = req.result
-                .filter(entry => !entry.backedUpAt)
-                .map(entry => entry.id);
+            const unbacked = req.result.filter((entry) => !entry.backedUpAt).map((entry) => entry.id);
             resolve(unbacked);
         };
         req.onerror = () => reject(req.error);
@@ -322,7 +323,6 @@ const BLOB_CHUNK_BYTES = 500 * 1024 * 1024; // 500 MB per chunk for Blob downloa
 const MOBILE_CHUNK_BYTES = 500 * 1024 * 1024; // 500 MB — ~12 FLAC tracks per chunk
 const MOBILE_EXPORT_CAP = 5 * 1024 * 1024 * 1024; // 5 GB per export tap (~125 FLAC tracks)
 
-
 function buildBackupHeader(trackCount) {
     const header = new ArrayBuffer(BACKUP_HEADER_BYTES);
     const hv = new DataView(header);
@@ -354,8 +354,9 @@ export async function exportOfflineTracks(onProgress, { incremental = false, onC
     // Skip on mobile — Chrome Android exposes showSaveFilePicker over HTTPS
     // but handle.getFile() returns unreliable size, breaking verification.
     // The Blob + Web Share API fallback is more reliable on mobile.
-    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
-        || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent)); // iPadOS 13+
+    const isMobile =
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+        (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent)); // iPadOS 13+
     if (window.showSaveFilePicker && !isMobile) {
         // Pre-calculate total size for accurate progress + verification
         let totalBytes = BACKUP_HEADER_BYTES;
@@ -417,8 +418,8 @@ export async function exportOfflineTracks(onProgress, { incremental = false, onC
     // tracks stay "unbacked-up" and are picked up on the next Export tap.
     const isStreaming = typeof onChunkReady === 'function';
     const effectiveChunkBytes = isStreaming ? MOBILE_CHUNK_BYTES : BLOB_CHUNK_BYTES;
-    const chunks = [];       // only used when NOT streaming
-    let parts = [];          // Uint8Array / ArrayBuffer parts only — no raw Blobs
+    const chunks = []; // only used when NOT streaming
+    let parts = []; // Uint8Array / ArrayBuffer parts only — no raw Blobs
     let chunkTrackCount = 0;
     let currentChunkBytes = BACKUP_HEADER_BYTES;
     let chunkIndex = 0;
@@ -488,7 +489,10 @@ export async function exportOfflineTracks(onProgress, { incremental = false, onC
 
     // ── Streaming mode: chunks already delivered ──
     if (isStreaming) {
-        emitBackupProgress(onProgress, createBackupProgress('verifying', tracksProcessed, count, cumulativeBytes, cumulativeBytes));
+        emitBackupProgress(
+            onProgress,
+            createBackupProgress('verifying', tracksProcessed, count, cumulativeBytes, cumulativeBytes)
+        );
         return {
             blob: null,
             count: tracksProcessed,
@@ -506,10 +510,27 @@ export async function exportOfflineTracks(onProgress, { incremental = false, onC
     emitBackupProgress(onProgress, createBackupProgress('verifying', count, count, grandTotalBytes, grandTotalBytes));
 
     if (chunks.length === 1) {
-        return { blob: chunks[0].blob, count, totalBytes: chunks[0].totalBytes, method: 'download', verified: true, exportedKeys: keys, remaining: 0 };
+        return {
+            blob: chunks[0].blob,
+            count,
+            totalBytes: chunks[0].totalBytes,
+            method: 'download',
+            verified: true,
+            exportedKeys: keys,
+            remaining: 0,
+        };
     }
 
-    return { blob: null, chunks, count, totalBytes: grandTotalBytes, method: 'chunked-download', verified: true, exportedKeys: keys, remaining: 0 };
+    return {
+        blob: null,
+        chunks,
+        count,
+        totalBytes: grandTotalBytes,
+        method: 'chunked-download',
+        verified: true,
+        exportedKeys: keys,
+        remaining: 0,
+    };
 }
 
 /**
@@ -559,7 +580,10 @@ export async function importOfflineTracks(file, onProgress, overwrite = false) {
         await new Promise((resolve, reject) => {
             const tx = db.transaction(STORE_TRACKS, 'readonly');
             const req = tx.objectStore(STORE_TRACKS).getAllKeys();
-            req.onsuccess = () => { req.result.forEach(k => existingIds.add(String(k))); resolve(); };
+            req.onsuccess = () => {
+                req.result.forEach((k) => existingIds.add(String(k)));
+                resolve();
+            };
             req.onerror = () => reject(req.error);
         });
     }
@@ -573,7 +597,12 @@ export async function importOfflineTracks(file, onProgress, overwrite = false) {
 
     for (let i = 0; i < count; i++) {
         // Read length header
-        const lenBuf = await readExactFileSlice(file, offset, BACKUP_ENTRY_HEADER_BYTES, `backup entry ${i + 1} header`);
+        const lenBuf = await readExactFileSlice(
+            file,
+            offset,
+            BACKUP_ENTRY_HEADER_BYTES,
+            `backup entry ${i + 1} header`
+        );
         const lenView = new DataView(lenBuf);
         const metaLen = lenView.getUint32(0);
         const audioLen = lenView.getUint32(4);
@@ -592,7 +621,13 @@ export async function importOfflineTracks(file, onProgress, overwrite = false) {
         }
         offset += metaLen;
 
-        if (!parsed || typeof parsed !== 'object' || parsed.id === undefined || !parsed.metadata || typeof parsed.metadata !== 'object') {
+        if (
+            !parsed ||
+            typeof parsed !== 'object' ||
+            parsed.id === undefined ||
+            !parsed.metadata ||
+            typeof parsed.metadata !== 'object'
+        ) {
             throw new Error(`Backup file is missing metadata for track ${i + 1}`);
         }
         const trackId = String(parsed.id);
@@ -610,14 +645,20 @@ export async function importOfflineTracks(file, onProgress, overwrite = false) {
         seenIds.add(trackId);
 
         // Read audio and cover as Blobs (slice — no full copy into memory)
-        const audioBlob = audioLen > 0
-            ? new Blob([await readExactFileSlice(file, offset, audioLen, `audio data for track ${i + 1}`)], { type: 'audio/flac' })
-            : new Blob([]);
+        const audioBlob =
+            audioLen > 0
+                ? new Blob([await readExactFileSlice(file, offset, audioLen, `audio data for track ${i + 1}`)], {
+                      type: 'audio/flac',
+                  })
+                : new Blob([]);
         offset += audioLen;
 
-        const coverBlob = coverLen > 0
-            ? new Blob([await readExactFileSlice(file, offset, coverLen, `cover art for track ${i + 1}`)], { type: 'image/jpeg' })
-            : null;
+        const coverBlob =
+            coverLen > 0
+                ? new Blob([await readExactFileSlice(file, offset, coverLen, `cover art for track ${i + 1}`)], {
+                      type: 'image/jpeg',
+                  })
+                : null;
         offset += coverLen;
 
         // Write to IndexedDB

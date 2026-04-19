@@ -144,7 +144,10 @@ function setAssistantSource(source) {
 
 function getTrackArtistLabel(track) {
     if (Array.isArray(track?.artists) && track.artists.length > 0) {
-        return track.artists.map((artist) => artist?.name).filter(Boolean).join(', ');
+        return track.artists
+            .map((artist) => artist?.name)
+            .filter(Boolean)
+            .join(', ');
     }
 
     if (track?.artist?.name) {
@@ -221,7 +224,10 @@ function renderMessagesHtml() {
  * @param {import('./api.js').LosslessAPI} api
  */
 async function resolveTracksFromLlmText(text, api) {
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    const lines = text
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
     /** @type {{ title: string; artist: string }[]} */
     const suggestions = [];
     for (const line of lines) {
@@ -535,7 +541,9 @@ async function submitPrompt(prompt) {
             const cfg = readStoredLlmConfig();
             if (!cfg) {
                 chatState.messages.push(
-                    createResponseMessage('Connect an LLM first: tap Setup LLM or the gear icon, run the connection test, then save.')
+                    createResponseMessage(
+                        'Connect an LLM first: tap Setup LLM or the gear icon, run the connection test, then save.'
+                    )
                 );
             } else {
                 const reply = await submitLlmPrompt(cfg, prompt);
@@ -673,7 +681,9 @@ function openLlmSetupModal(options = {}) {
             );
             if (draftConfig.mode !== 'sone-chat') {
                 draftConfig.model = /** @type {HTMLInputElement} */ (modal.querySelector('#ai-llm-model')).value.trim();
-                draftConfig.apiKey = /** @type {HTMLInputElement} */ (modal.querySelector('#ai-llm-apikey')).value.trim();
+                draftConfig.apiKey = /** @type {HTMLInputElement} */ (
+                    modal.querySelector('#ai-llm-apikey')
+                ).value.trim();
             } else {
                 draftConfig.model = '';
                 draftConfig.apiKey = '';
@@ -702,9 +712,7 @@ function openLlmSetupModal(options = {}) {
                 };
             } else {
                 const url =
-                    prevMode === 'g4f' || isG4fDefaultEndpoint(draftConfig.url)
-                        ? OLLAMA_EXAMPLE_URL
-                        : draftConfig.url;
+                    prevMode === 'g4f' || isG4fDefaultEndpoint(draftConfig.url) ? OLLAMA_EXAMPLE_URL : draftConfig.url;
                 draftConfig = {
                     ...draftConfig,
                     mode: 'openai-compatible',
@@ -712,8 +720,10 @@ function openLlmSetupModal(options = {}) {
                 };
             }
             /** @type {HTMLInputElement | null} */ (modal.querySelector('#ai-llm-url')).value = draftConfig.url;
-            /** @type {HTMLInputElement | null} */ (modal.querySelector('#ai-llm-model')).value = draftConfig.model || '';
-            /** @type {HTMLInputElement | null} */ (modal.querySelector('#ai-llm-apikey')).value = draftConfig.apiKey || '';
+            /** @type {HTMLInputElement | null} */ (modal.querySelector('#ai-llm-model')).value =
+                draftConfig.model || '';
+            /** @type {HTMLInputElement | null} */ (modal.querySelector('#ai-llm-apikey')).value =
+                draftConfig.apiKey || '';
             connectionState = { status: 'idle', message: '' };
             syncModeUi();
             updateConnectionMsg();

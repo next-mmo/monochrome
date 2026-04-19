@@ -117,12 +117,13 @@ export function normalizeConfig(config) {
  * @returns {value is StoredLlmConfig}
  */
 function isStoredLlmConfig(value) {
-    const mode = value != null && typeof value === 'object' ? /** @type {{ mode?: unknown }} */ (value).mode : undefined;
+    const mode =
+        value != null && typeof value === 'object' ? /** @type {{ mode?: unknown }} */ (value).mode : undefined;
     return (
         value != null &&
         typeof value === 'object' &&
         (mode === 'sone-chat' || mode === 'g4f' || mode === 'openai-compatible') &&
-        typeof /** @type {{ url?: unknown }} */ (value).url === 'string'
+        typeof (/** @type {{ url?: unknown }} */ (value).url) === 'string'
     );
 }
 
@@ -362,7 +363,10 @@ function parseG4fEventData(streamText) {
 /** @param {unknown} event */
 function extractAssistantTextFromG4fEvent(event) {
     if (!event) return '';
-    if (/** @type {{ type?: string; content?: string }} */ (event).type === 'content' && typeof event.content === 'string') {
+    if (
+        /** @type {{ type?: string; content?: string }} */ (event).type === 'content' &&
+        typeof event.content === 'string'
+    ) {
         return event.content;
     }
     return '';
@@ -370,9 +374,10 @@ function extractAssistantTextFromG4fEvent(event) {
 
 /** @param {unknown} event */
 function extractAssistantTextFromG4fResponse(event) {
-    const e = /** @type {{ response?: { choices?: Array<{ delta?: { content?: string }; message?: { content?: string | Array<{ text?: string }> } }> } } } */ (
-        event
-    );
+    const e =
+        /** @type {{ response?: { choices?: Array<{ delta?: { content?: string }; message?: { content?: string | Array<{ text?: string }> } }> } } } */ (
+            event
+        );
     if (!e?.response) {
         return '';
     }
@@ -568,7 +573,10 @@ async function readG4fConversationStream(response, signal) {
             deferredErrors.push(respErr);
         }
 
-        if (/** @type {{ type?: string }} */ (event).type === 'error' || /** @type {{ type?: string }} */ (event).type === 'auth') {
+        if (
+            /** @type {{ type?: string }} */ (event).type === 'error' ||
+            /** @type {{ type?: string }} */ (event).type === 'auth'
+        ) {
             const terminalError = readG4fError(event);
             if (terminalError) {
                 terminalErrors.push(terminalError);
@@ -576,7 +584,10 @@ async function readG4fConversationStream(response, signal) {
             return 'done';
         }
 
-        if (/** @type {{ type?: string }} */ (event).type === 'finish' || /** @type {{ type?: string }} */ (event).type === 'usage') {
+        if (
+            /** @type {{ type?: string }} */ (event).type === 'finish' ||
+            /** @type {{ type?: string }} */ (event).type === 'usage'
+        ) {
             return 'done';
         }
 
@@ -725,15 +736,18 @@ async function requestG4fConversationText(messages, config, runtime, images) {
 async function fetchG4fModels(config, runtime) {
     const apiKeyPayload = buildG4fApiKeyPayload(config);
     const xApiKeyHeader = typeof apiKeyPayload === 'string' ? apiKeyPayload : '';
-    const response = await ensureFetch(runtime.fetch)(`${resolveG4fApiBase(config.url)}/models/${DEFAULT_G4F_PROVIDER}`, {
-        headers: {
-            accept: '*/*',
-            'Content-Type': 'application/json',
-            'x-api-key': xApiKeyHeader,
-            'x-ignored': DEFAULT_G4F_IGNORED.join(' '),
-        },
-        signal: runtime.signal,
-    });
+    const response = await ensureFetch(runtime.fetch)(
+        `${resolveG4fApiBase(config.url)}/models/${DEFAULT_G4F_PROVIDER}`,
+        {
+            headers: {
+                accept: '*/*',
+                'Content-Type': 'application/json',
+                'x-api-key': xApiKeyHeader,
+                'x-ignored': DEFAULT_G4F_IGNORED.join(' '),
+            },
+            signal: runtime.signal,
+        }
+    );
 
     if (!response.ok) {
         throw new Error(await readJsonError(response));
