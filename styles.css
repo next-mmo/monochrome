@@ -10878,6 +10878,7 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
     100% {
         transform: translateY(0);
     }
+
     50% {
         transform: translateY(-8px);
     }
@@ -10937,6 +10938,7 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
     100% {
         opacity: 1;
     }
+
     50% {
         opacity: 0.6;
     }
@@ -11070,6 +11072,7 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
     from {
         transform: translate(-50%, -50%) rotate(0deg);
     }
+
     to {
         transform: translate(-50%, -50%) rotate(360deg);
     }
@@ -11088,6 +11091,7 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
     from {
         transform: rotate(0deg);
     }
+
     to {
         transform: rotate(360deg);
     }
