@@ -36,6 +36,7 @@ import { ThemeStore } from './themeStore.js';
 import './commandPalette.js';
 import { initTracker } from './tracker.js';
 import { initAnalytics } from './analytics.js';
+import { initializeAiAssistantFab } from './ai-assistant-panel.js';
 import {
     parseCSV,
     parseJSPF,
@@ -647,6 +648,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         scrobbler
     );
     initializeUIInteractions(Player.instance, MusicAPI.instance, UIRenderer.instance);
+    initializeAiAssistantFab(Player.instance, MusicAPI.instance);
     initializeKeyboardShortcuts(Player.instance, audioPlayer);
 
     // Restore UI state for the current track (like button, theme)

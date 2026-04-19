@@ -90,6 +90,7 @@
         "eventemitter3": "^5.0.4",
         "events": "^3.3.0",
         "fuse.js": "^7.1.0",
+        "jsencrypt": "^3.5.4",
         "hls.js": "^1.6.15",
         "jose": "^6.2.0",
         "lucide-static": "^0.577.0",
