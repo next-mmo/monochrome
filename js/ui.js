@@ -2804,26 +2804,28 @@ export class UIRenderer {
 
     async renderMoviePage() {
         this.showPage('movie');
-        
+
         const { radioTrackManager } = await import('./radio-tracks.js');
         const movies = await radioTrackManager.loadTracksByFilter('movie', 'all');
-        
+
         const tabsContainer = document.querySelector('.movie-tabs');
         const iframeContainer = document.getElementById('movie-iframe');
-        
+
         if (movies.length === 0) {
             movies.push({
                 audioUrl: 'https://geo.dailymotion.com/player.html?playlist=xc2odc',
                 title: 'សាមកុក-Samkok',
             });
         }
-        
+
         // Generate tabs
-        tabsContainer.innerHTML = movies.map((movie, index) => {
-            const isActive = index === 0 ? 'active' : '';
-            return `<button class="search-tab movie-tab ${isActive}" data-url="${movie.audioUrl}">${movie.title}</button>`;
-        }).join('');
-        
+        tabsContainer.innerHTML = movies
+            .map((movie, index) => {
+                const isActive = index === 0 ? 'active' : '';
+                return `<button class="search-tab movie-tab ${isActive}" data-url="${movie.audioUrl}">${movie.title}</button>`;
+            })
+            .join('');
+
         // Update iframe to the first movie
         if (iframeContainer && movies[0].audioUrl) {
             iframeContainer.src = movies[0].audioUrl;
@@ -2832,7 +2834,7 @@ export class UIRenderer {
         // Add event listeners for the generated tabs
         tabsContainer.querySelectorAll('.movie-tab').forEach((tab) => {
             tab.addEventListener('click', () => {
-                tabsContainer.querySelectorAll('.movie-tab').forEach(t => t.classList.remove('active'));
+                tabsContainer.querySelectorAll('.movie-tab').forEach((t) => t.classList.remove('active'));
                 tab.classList.add('active');
                 if (iframeContainer && tab.dataset.url) {
                     iframeContainer.src = tab.dataset.url;
@@ -2868,13 +2870,13 @@ export class UIRenderer {
         const adminMainTabsEl = document.getElementById('admin-main-tabs');
         const adminSectionRadio = document.getElementById('admin-section-radio');
         const adminSectionMovie = document.getElementById('admin-section-movie');
-        
+
         if (adminMainTabsEl) {
             adminMainTabsEl.querySelectorAll('.search-tab').forEach((tab) => {
                 tab.addEventListener('click', () => {
-                    adminMainTabsEl.querySelectorAll('.search-tab').forEach(t => t.classList.remove('active'));
+                    adminMainTabsEl.querySelectorAll('.search-tab').forEach((t) => t.classList.remove('active'));
                     tab.classList.add('active');
-                    
+
                     if (tab.dataset.target === 'admin-section-radio') {
                         adminSectionRadio.style.display = 'block';
                         adminSectionMovie.style.display = 'none';
@@ -2907,7 +2909,9 @@ export class UIRenderer {
                 return;
             }
 
-            movieListEl.innerHTML = movies.map((track, i) => `
+            movieListEl.innerHTML = movies
+                .map(
+                    (track, i) => `
                 <div class="admin-track-row" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; background: var(--background-secondary); border-radius: var(--radius);">
                     <span style="color: var(--muted-foreground); font-size: 0.8rem; min-width: 1.5rem; text-align: center;">${i + 1}</span>
                     <div style="flex: 1; min-width: 0;">
@@ -2918,7 +2922,9 @@ export class UIRenderer {
                         <use svg="!lucide/x.svg" size="16" />
                     </button>
                 </div>
-            `).join('');
+            `
+                )
+                .join('');
 
             movieListEl.querySelectorAll('.admin-remove-movie').forEach((btn) => {
                 btn.addEventListener('click', async () => {
@@ -2932,7 +2938,10 @@ export class UIRenderer {
             addMovieBtn.onclick = async () => {
                 const url = movieUrlInput?.value?.trim();
                 const title = movieTitleInput?.value?.trim() || 'Untitled Movie';
-                if (!url) { movieUrlInput?.focus(); return; }
+                if (!url) {
+                    movieUrlInput?.focus();
+                    return;
+                }
                 await radioTrackManager.addTrack({
                     title: title,
                     artistName: 'Movie',
@@ -2948,10 +2957,10 @@ export class UIRenderer {
 
         const populateFormSelects = () => {
             // Filter out 'movie' category from radio form
-            const filteredCategories = RADIO_CATEGORIES.filter(cat => cat.id !== 'movie');
-            categorySelect.innerHTML = filteredCategories.map(
-                (cat) => `<option value="${cat.id}">${cat.label}</option>`
-            ).join('');
+            const filteredCategories = RADIO_CATEGORIES.filter((cat) => cat.id !== 'movie');
+            categorySelect.innerHTML = filteredCategories
+                .map((cat) => `<option value="${cat.id}">${cat.label}</option>`)
+                .join('');
             const updateSubOpts = () => {
                 const cat = filteredCategories.find((c) => c.id === categorySelect.value);
                 const subs = cat?.subs?.filter((s) => s.id !== 'all') || [];
@@ -2993,11 +3002,14 @@ export class UIRenderer {
         };
 
         const renderCatTabs = async () => {
-            categoryTabsEl.innerHTML = '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
+            categoryTabsEl.innerHTML =
+                '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
             const allTracks = await radioTrackManager.loadTracks();
             const allCount = allTracks.length;
-            const htmls = [`<button class="search-tab${filterCategory === 'all' ? ' active' : ''}" data-category="all">All (${allCount})</button>`];
-            const filteredCategories = RADIO_CATEGORIES.filter(cat => cat.id !== 'movie');
+            const htmls = [
+                `<button class="search-tab${filterCategory === 'all' ? ' active' : ''}" data-category="all">All (${allCount})</button>`,
+            ];
+            const filteredCategories = RADIO_CATEGORIES.filter((cat) => cat.id !== 'movie');
             for (const cat of filteredCategories) {
                 const tracks = await radioTrackManager.loadTracksByFilter(cat.id, null);
                 htmls.push(
@@ -3021,14 +3033,14 @@ export class UIRenderer {
 
         const renderTrackList = async () => {
             let allTracks = await radioTrackManager.loadTracks();
-            allTracks = allTracks.filter(t => t.category !== 'movie'); // Hide movies in radio admin
-            
+            allTracks = allTracks.filter((t) => t.category !== 'movie'); // Hide movies in radio admin
+
             let tracks = await radioTrackManager.loadTracksByFilter(
                 filterCategory === 'all' ? null : filterCategory,
                 filterSubcategory === 'all' ? null : filterSubcategory
             );
-            tracks = tracks.filter(t => t.category !== 'movie'); // Hide movies in radio admin
-            
+            tracks = tracks.filter((t) => t.category !== 'movie'); // Hide movies in radio admin
+
             trackCountEl.textContent = `${allTracks.length} total \u00b7 ${tracks.length} shown`;
 
             if (tracks.length === 0) {
@@ -3073,7 +3085,10 @@ export class UIRenderer {
         if (addBtn) {
             addBtn.onclick = async () => {
                 const url = urlInput?.value?.trim();
-                if (!url) { urlInput?.focus(); return; }
+                if (!url) {
+                    urlInput?.focus();
+                    return;
+                }
                 await radioTrackManager.addTrack({
                     title: titleInput?.value?.trim() || 'Untitled',
                     artistName: artistInput?.value?.trim() || 'Unknown',

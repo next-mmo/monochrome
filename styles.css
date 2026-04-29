@@ -1115,7 +1115,14 @@ ul {
 .now-playing-bar {
     grid-area: player;
     padding: var(--spacing-sm) var(--spacing-md);
+    display: none;
+}
+
+.now-playing-bar.is-active {
     display: grid;
+}
+
+.now-playing-bar {
     grid-template-columns: 1fr 0.9fr 1fr;
     align-items: center;
     gap: var(--spacing-sm);
@@ -12309,7 +12316,7 @@ body.radio-active .progress-container {
     letter-spacing: -0.02em;
     margin-bottom: 0.5rem;
     background: linear-gradient(135deg, var(--foreground), var(--muted-foreground));
-    -webkit-background-clip: text;
+    background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
@@ -12327,14 +12334,14 @@ body.radio-active .progress-container {
 
 .radio-glass-container {
     position: relative;
-    background: rgba(var(--highlight-rgb), 0.05);
+    background: rgb(var(--highlight-rgb), 0.05);
     backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(var(--highlight-rgb), 0.1);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgb(var(--highlight-rgb), 0.1);
     border-radius: 24px;
     padding: 2rem 1.5rem;
     margin-bottom: 2rem;
-    box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 20px 40px -10px rgb(0, 0, 0, 0.3);
     overflow: hidden;
     transition:
         transform 0.3s ease,
@@ -12342,7 +12349,7 @@ body.radio-active .progress-container {
 }
 
 .radio-glass-container:hover {
-    box-shadow: 0 25px 50px -12px rgba(var(--highlight-rgb), 0.2);
+    box-shadow: 0 25px 50px -12px rgb(var(--highlight-rgb), 0.2);
 }
 
 .radio-glow-bg {
@@ -12352,7 +12359,7 @@ body.radio-active .progress-container {
     transform: translateX(-50%);
     width: 100%;
     height: 100%;
-    background: radial-gradient(circle at top, rgba(var(--highlight-rgb), 0.15) 0%, transparent 60%);
+    background: radial-gradient(circle at top, rgb(var(--highlight-rgb), 0.15) 0%, transparent 60%);
     pointer-events: none;
 }
 
@@ -12365,7 +12372,7 @@ body.radio-active .progress-container {
     position: relative;
     width: 160px;
     height: 160px;
-    margin: 0 auto 1.5rem auto;
+    margin: 0 auto 1.5rem;
 }
 
 .radio-cover-image {
@@ -12373,7 +12380,7 @@ body.radio-active .progress-container {
     height: 100%;
     border-radius: 16px;
     object-fit: cover;
-    box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 12px 24px -8px rgb(0, 0, 0, 0.5);
     transition: transform 0.3s ease;
 }
 
@@ -12385,19 +12392,19 @@ body.radio-active .progress-container {
     font-size: 1.5rem;
     font-weight: 700;
     margin-bottom: 0.25rem;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 2px 4px rgb(0, 0, 0, 0.5);
 }
 
 .radio-track-artist {
-    color: rgba(255, 255, 255, 0.7);
+    color: rgb(255, 255, 255, 0.7);
     font-size: 1rem;
     font-weight: 500;
 }
 
 .radio-badge-container {
     display: inline-block;
-    background: rgba(var(--highlight-rgb), 0.15);
-    border: 1px solid rgba(var(--highlight-rgb), 0.2);
+    background: rgb(var(--highlight-rgb), 0.15);
+    border: 1px solid rgb(var(--highlight-rgb), 0.2);
     padding: 0.25rem 0.75rem;
     border-radius: 99px;
     margin-top: 1rem;
@@ -12420,7 +12427,7 @@ body.radio-active .progress-container {
     padding: 1rem 2.5rem;
     border-radius: 50px;
     border: none;
-    box-shadow: 0 8px 20px -6px rgba(var(--highlight-rgb), 0.5);
+    box-shadow: 0 8px 20px -6px rgb(var(--highlight-rgb), 0.5);
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
@@ -12432,10 +12439,10 @@ body.radio-active .progress-container {
 
 .radio-play-button:hover {
     transform: translateY(-2px);
-    box-shadow: 0 12px 24px -8px rgba(var(--highlight-rgb), 0.6);
+    box-shadow: 0 12px 24px -8px rgb(var(--highlight-rgb), 0.6);
 }
 
 .radio-play-button:active {
     transform: translateY(1px);
-    box-shadow: 0 4px 10px -4px rgba(var(--highlight-rgb), 0.5);
+    box-shadow: 0 4px 10px -4px rgb(var(--highlight-rgb), 0.5);
 }

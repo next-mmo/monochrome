@@ -124,7 +124,7 @@ async function saveTracks(tracks) {
         await fetch('/api/radio-tracks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(tracks)
+            body: JSON.stringify(tracks),
         });
     } catch (e) {
         console.error('Failed to save radio tracks via API', e);
@@ -153,7 +153,7 @@ async function addTrack(track) {
 
 async function removeTrack(trackId) {
     const tracks = await loadTracks();
-    const filtered = tracks.filter(t => t.id !== trackId);
+    const filtered = tracks.filter((t) => t.id !== trackId);
     await saveTracks(filtered);
     return filtered;
 }
@@ -168,7 +168,7 @@ async function resetToDefaults() {
     return [...defaultTracks];
 }
 
-// Initial tracks might not be loaded synchronously anymore, so we remove the synchronous export 
+// Initial tracks might not be loaded synchronously anymore, so we remove the synchronous export
 // and clients should use `await radioTrackManager.loadTracks()` instead.
 // export const radioTracks = loadTracks();
 export const radioTrackManager = {
