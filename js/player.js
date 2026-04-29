@@ -1336,7 +1336,10 @@ export class Player {
     async playNext(recursiveCount = 0) {
         if (this.is247Radio) {
             const { radioTrackManager } = await import('./radio-tracks.js');
-            const tracks = await radioTrackManager.loadTracksByFilter(this.radioCategory || null, this.radioSubcategory || null);
+            const tracks = await radioTrackManager.loadTracksByFilter(
+                this.radioCategory || null,
+                this.radioSubcategory || null
+            );
             if (tracks.length === 0) return;
             
             if (this._initialRadioLoad) {
