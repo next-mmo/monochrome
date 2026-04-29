@@ -8,7 +8,7 @@ export const RADIO_CATEGORIES = [
             { id: 'all', label: 'All' },
             { id: 'khmer', label: 'Khmer' },
             { id: 'english', label: 'English' },
-        ]
+        ],
     },
     {
         id: 'movie',
@@ -17,7 +17,7 @@ export const RADIO_CATEGORIES = [
             { id: 'all', label: 'All' },
             { id: 'khmer', label: 'Khmer' },
             { id: 'english', label: 'English' },
-        ]
+        ],
     },
     {
         id: 'music',
@@ -27,7 +27,7 @@ export const RADIO_CATEGORIES = [
             { id: 'khmer', label: 'Khmer' },
             { id: 'english', label: 'English' },
             { id: 'kpop', label: 'K-Pop' },
-        ]
+        ],
     },
     {
         id: 'offline',
@@ -37,7 +37,7 @@ export const RADIO_CATEGORIES = [
             { id: 'khmer', label: 'Khmer' },
             { id: 'english', label: 'English' },
             { id: 'kpop', label: 'K-Pop' },
-        ]
+        ],
     },
 ];
 
@@ -54,8 +54,8 @@ const defaultTracks = [
         type: 'track',
         provider: 'custom',
         isLocal: false,
-        duration: 0
-    }
+        duration: 0,
+    },
 ];
 
 function loadTracks() {
@@ -76,13 +76,17 @@ async function loadTracksByFilter(category, subcategory) {
         try {
             const { getAllOfflineTracks, buildPlayableTrack } = await import('./offline.js');
             const entries = await getAllOfflineTracks();
-            let offlineTracks = entries.map(entry => {
+            let offlineTracks = entries.map((entry) => {
                 const t = buildPlayableTrack(entry);
                 t.category = 'offline';
                 return t;
             });
             if (subcategory && subcategory !== 'all') {
-                offlineTracks = offlineTracks.filter(t => t.subcategory === subcategory || (t.genre && t.genre.toLowerCase() === subcategory.toLowerCase()));
+                offlineTracks = offlineTracks.filter(
+                    (t) =>
+                        t.subcategory === subcategory ||
+                        (t.genre && t.genre.toLowerCase() === subcategory.toLowerCase())
+                );
             }
             return offlineTracks;
         } catch (e) {
@@ -93,10 +97,10 @@ async function loadTracksByFilter(category, subcategory) {
 
     let tracks = loadTracks();
     if (category && category !== 'all') {
-        tracks = tracks.filter(t => t.category === category);
+        tracks = tracks.filter((t) => t.category === category);
     }
     if (subcategory && subcategory !== 'all') {
-        tracks = tracks.filter(t => t.subcategory === subcategory);
+        tracks = tracks.filter((t) => t.subcategory === subcategory);
     }
     return tracks;
 }
@@ -119,14 +123,14 @@ function addTrack(track) {
         type: 'track',
         provider: 'custom',
         isLocal: false,
-        duration: 0
+        duration: 0,
     });
     saveTracks(tracks);
     return tracks;
 }
 
 function removeTrack(trackId) {
-    const tracks = loadTracks().filter(t => t.id !== trackId);
+    const tracks = loadTracks().filter((t) => t.id !== trackId);
     saveTracks(tracks);
     return tracks;
 }
@@ -149,5 +153,5 @@ export const radioTrackManager = {
     addTrack,
     removeTrack,
     clearTracks,
-    resetToDefaults
+    resetToDefaults,
 };

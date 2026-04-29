@@ -2714,7 +2714,7 @@ export class UIRenderer {
         let selectedCategory = RADIO_CATEGORIES[0]?.id || 'podcast';
         let selectedSubcategory = 'all';
 
-        const getActiveCat = () => RADIO_CATEGORIES.find(c => c.id === selectedCategory);
+        const getActiveCat = () => RADIO_CATEGORIES.find((c) => c.id === selectedCategory);
 
         const renderSubTabs = async () => {
             const cat = getActiveCat();
@@ -2722,14 +2722,17 @@ export class UIRenderer {
                 subcategoryTabsEl.innerHTML = '';
                 return;
             }
-            subcategoryTabsEl.innerHTML = '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
+            subcategoryTabsEl.innerHTML =
+                '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
             const htmls = [];
             for (const sub of cat.subs) {
                 const tracks = await radioTrackManager.loadTracksByFilter(selectedCategory, sub.id);
-                htmls.push(`<button class="search-tab${selectedSubcategory === sub.id ? ' active' : ''}" data-sub="${sub.id}">${sub.label} (${tracks.length})</button>`);
+                htmls.push(
+                    `<button class="search-tab${selectedSubcategory === sub.id ? ' active' : ''}" data-sub="${sub.id}">${sub.label} (${tracks.length})</button>`
+                );
             }
             subcategoryTabsEl.innerHTML = htmls.join('');
-            subcategoryTabsEl.querySelectorAll('.search-tab').forEach(tab => {
+            subcategoryTabsEl.querySelectorAll('.search-tab').forEach((tab) => {
                 tab.addEventListener('click', () => {
                     selectedSubcategory = tab.dataset.sub;
                     this.player.radioSubcategory = selectedSubcategory;
@@ -2739,14 +2742,17 @@ export class UIRenderer {
         };
 
         const renderCatTabs = async () => {
-            categoryTabsEl.innerHTML = '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading categories...</span>';
+            categoryTabsEl.innerHTML =
+                '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading categories...</span>';
             const htmls = [];
             for (const cat of RADIO_CATEGORIES) {
                 const tracks = await radioTrackManager.loadTracksByFilter(cat.id, null);
-                htmls.push(`<button class="search-tab${selectedCategory === cat.id ? ' active' : ''}" data-category="${cat.id}">${cat.label} (${tracks.length})</button>`);
+                htmls.push(
+                    `<button class="search-tab${selectedCategory === cat.id ? ' active' : ''}" data-category="${cat.id}">${cat.label} (${tracks.length})</button>`
+                );
             }
             categoryTabsEl.innerHTML = htmls.join('');
-            categoryTabsEl.querySelectorAll('.search-tab').forEach(tab => {
+            categoryTabsEl.querySelectorAll('.search-tab').forEach((tab) => {
                 tab.addEventListener('click', () => {
                     selectedCategory = tab.dataset.category;
                     selectedSubcategory = 'all';
@@ -2779,7 +2785,8 @@ export class UIRenderer {
                 this.player.radioCategory = selectedCategory;
                 this.player.radioSubcategory = selectedSubcategory;
                 this.player.playNext();
-                playBtn.innerHTML = '<use svg="!lucide/radio.svg" size="24" style="margin-right: 0.5rem;"/> Playing Radio...';
+                playBtn.innerHTML =
+                    '<use svg="!lucide/radio.svg" size="24" style="margin-right: 0.5rem;"/> Playing Radio...';
             };
         }
     }
@@ -2807,32 +2814,41 @@ export class UIRenderer {
 
         // Populate form dropdowns
         const populateFormSelects = () => {
-            categorySelect.innerHTML = RADIO_CATEGORIES.map(cat =>
-                `<option value="${cat.id}">${cat.label}</option>`
+            categorySelect.innerHTML = RADIO_CATEGORIES.map(
+                (cat) => `<option value="${cat.id}">${cat.label}</option>`
             ).join('');
             const updateSubOpts = () => {
-                const cat = RADIO_CATEGORIES.find(c => c.id === categorySelect.value);
-                const subs = cat?.subs?.filter(s => s.id !== 'all') || [];
-                subcategorySelect.innerHTML = subs.map(sub =>
-                    `<option value="${sub.id}">${sub.label}</option>`
-                ).join('');
+                const cat = RADIO_CATEGORIES.find((c) => c.id === categorySelect.value);
+                const subs = cat?.subs?.filter((s) => s.id !== 'all') || [];
+                subcategorySelect.innerHTML = subs
+                    .map((sub) => `<option value="${sub.id}">${sub.label}</option>`)
+                    .join('');
             };
             categorySelect.addEventListener('change', updateSubOpts);
             updateSubOpts();
         };
 
         const renderSubTabs = async () => {
-            if (filterCategory === 'all') { subcategoryTabsEl.innerHTML = ''; return; }
-            const cat = RADIO_CATEGORIES.find(c => c.id === filterCategory);
-            if (!cat || !cat.subs) { subcategoryTabsEl.innerHTML = ''; return; }
-            subcategoryTabsEl.innerHTML = '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
+            if (filterCategory === 'all') {
+                subcategoryTabsEl.innerHTML = '';
+                return;
+            }
+            const cat = RADIO_CATEGORIES.find((c) => c.id === filterCategory);
+            if (!cat || !cat.subs) {
+                subcategoryTabsEl.innerHTML = '';
+                return;
+            }
+            subcategoryTabsEl.innerHTML =
+                '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
             const htmls = [];
             for (const sub of cat.subs) {
                 const tracks = await radioTrackManager.loadTracksByFilter(filterCategory, sub.id);
-                htmls.push(`<button class="search-tab${filterSubcategory === sub.id ? ' active' : ''}" data-sub="${sub.id}">${sub.label} (${tracks.length})</button>`);
+                htmls.push(
+                    `<button class="search-tab${filterSubcategory === sub.id ? ' active' : ''}" data-sub="${sub.id}">${sub.label} (${tracks.length})</button>`
+                );
             }
             subcategoryTabsEl.innerHTML = htmls.join('');
-            subcategoryTabsEl.querySelectorAll('.search-tab').forEach(tab => {
+            subcategoryTabsEl.querySelectorAll('.search-tab').forEach((tab) => {
                 tab.addEventListener('click', () => {
                     filterSubcategory = tab.dataset.sub;
                     renderSubTabs();
@@ -2842,15 +2858,20 @@ export class UIRenderer {
         };
 
         const renderCatTabs = async () => {
-            categoryTabsEl.innerHTML = '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
+            categoryTabsEl.innerHTML =
+                '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
             const allCount = radioTrackManager.loadTracks().length;
-            const htmls = [`<button class="search-tab${filterCategory === 'all' ? ' active' : ''}" data-category="all">All (${allCount})</button>`];
+            const htmls = [
+                `<button class="search-tab${filterCategory === 'all' ? ' active' : ''}" data-category="all">All (${allCount})</button>`,
+            ];
             for (const cat of RADIO_CATEGORIES) {
                 const tracks = await radioTrackManager.loadTracksByFilter(cat.id, null);
-                htmls.push(`<button class="search-tab${filterCategory === cat.id ? ' active' : ''}" data-category="${cat.id}">${cat.label} (${tracks.length})</button>`);
+                htmls.push(
+                    `<button class="search-tab${filterCategory === cat.id ? ' active' : ''}" data-category="${cat.id}">${cat.label} (${tracks.length})</button>`
+                );
             }
             categoryTabsEl.innerHTML = htmls.join('');
-            categoryTabsEl.querySelectorAll('.search-tab').forEach(tab => {
+            categoryTabsEl.querySelectorAll('.search-tab').forEach((tab) => {
                 tab.addEventListener('click', () => {
                     filterCategory = tab.dataset.category;
                     filterSubcategory = 'all';
@@ -2881,7 +2902,9 @@ export class UIRenderer {
                 return;
             }
 
-            trackListEl.innerHTML = tracks.map((track, i) => `
+            trackListEl.innerHTML = tracks
+                .map(
+                    (track, i) => `
                 <div class="admin-track-row" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; background: var(--background-secondary); border-radius: var(--radius);">
                     <span style="color: var(--muted-foreground); font-size: 0.8rem; min-width: 1.5rem; text-align: center;">${i + 1}</span>
                     <span style="font-size: 0.6rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.15rem 0.5rem; border-radius: 999px; background: ${catColors[track.category] || '#6b7280'}20; color: ${catColors[track.category] || '#6b7280'}; white-space: nowrap;">${track.category || '?'}</span>
@@ -2895,9 +2918,11 @@ export class UIRenderer {
                         <use svg="!lucide/x.svg" size="16" />
                     </button>
                 </div>
-            `).join('');
+            `
+                )
+                .join('');
 
-            trackListEl.querySelectorAll('.admin-remove-track').forEach(btn => {
+            trackListEl.querySelectorAll('.admin-remove-track').forEach((btn) => {
                 btn.addEventListener('click', async () => {
                     radioTrackManager.removeTrack(btn.dataset.trackId);
                     await renderCatTabs();
@@ -2910,13 +2935,16 @@ export class UIRenderer {
         if (addBtn) {
             addBtn.onclick = async () => {
                 const url = urlInput?.value?.trim();
-                if (!url) { urlInput?.focus(); return; }
+                if (!url) {
+                    urlInput?.focus();
+                    return;
+                }
                 radioTrackManager.addTrack({
                     title: titleInput?.value?.trim() || 'Untitled',
                     artistName: artistInput?.value?.trim() || 'Unknown',
                     audioUrl: url,
                     category: categorySelect?.value || 'music',
-                    subcategory: subcategorySelect?.value || 'khmer'
+                    subcategory: subcategorySelect?.value || 'khmer',
                 });
                 if (titleInput) titleInput.value = '';
                 if (artistInput) artistInput.value = '';
@@ -2952,7 +2980,6 @@ export class UIRenderer {
         await renderSubTabs();
         await renderTrackList();
     }
-
 
     async renderOfflinePage() {
         this.showPage('offline');
