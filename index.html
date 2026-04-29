@@ -1701,6 +1701,7 @@
                                     <span>24/7 Radio</span>
                                 </a>
                             </li>
+
                             <li class="nav-item" id="sidebar-nav-offline">
                                 <a href="/offline">
                                     <svg
@@ -1720,6 +1721,12 @@
                                     </svg>
                                     <span>Offline</span>
                                     <span id="offline-count-badge" class="offline-badge" style="display: none">0</span>
+                                </a>
+                            </li>
+                            <li class="nav-item" id="sidebar-nav-movie">
+                                <a href="/movie">
+                                    <use svg="!lucide/film.svg" size="24" />
+                                    <span>Movie</span>
                                 </a>
                             </li>
                             <li class="nav-item" id="sidebar-nav-library">
@@ -1750,50 +1757,6 @@
                                 <!-- Pinned should be injected here -->
                             </ul>
                         </nav>
-
-                        <div class="sidebar-nav-bottom">
-                            <div id="server-disruption-banner" class="server-disruption-sidebar" style="display: none">
-                                <span class="disruption-icon">&#9888;</span>
-                                <span
-                                    >Services are currently unstable. <br /><br />Use the extension
-                                    <a href="https://github.com/monochrome-music/monochrome/tree/main/extension"
-                                        >here</a
-                                    >
-                                    for the best experience.</span
-                                >
-                                <button id="dismiss-disruption-btn" class="disruption-dismiss" title="Dismiss">
-                                    &times;
-                                </button>
-                            </div>
-                            <nav class="sidebar-nav bottom">
-                                <ul>
-                                    <li class="nav-item" id="sidebar-nav-about-bottom">
-                                        <a href="/about">
-                                            <use svg="!lucide/info.svg" size="24" />
-                                            <span>About</span>
-                                        </a>
-                                    </li>
-                                    <li class="nav-item" id="sidebar-nav-discordbtn">
-                                        <a href="discord.html" target="_blank">
-                                            <use svg="./images/discord.svg" size="64" />
-                                            <span>Discord</span>
-                                        </a>
-                                    </li>
-                                    <li class="nav-item" id="sidebar-nav-party">
-                                        <a href="/parties" id="sidebar-party-btn">
-                                            <use svg="!lucide/users.svg" size="24" />
-                                            <span>Parties</span>
-                                        </a>
-                                    </li>
-                                    <li class="nav-item" id="sidebar-nav-githubbtn" style="display: none">
-                                        <a href="https://github.com/monochrome-music/monochrome" target="_blank">
-                                            <use svg="./images/github.svg" size="24" />
-                                            <span>GitHub</span>
-                                        </a>
-                                    </li>
-                                </ul>
-                            </nav>
-                        </div>
                     </div>
                 </div>
             </aside>
@@ -2397,6 +2360,33 @@
                     </div>
                 </div>
 
+                <div id="page-movie" class="page">
+                    <div style="padding: 2rem; max-width: 1200px; margin: 0 auto">
+                        <h2 class="section-title">Movies</h2>
+                        <div class="search-tabs movie-tabs" style="margin-bottom: 1.5rem">
+                            <!-- Movie tabs will be dynamically injected here -->
+                        </div>
+                        <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden">
+                            <iframe
+                                id="movie-iframe"
+                                src="https://geo.dailymotion.com/player.html?playlist=xc2odc"
+                                style="
+                                    width: 100%;
+                                    height: 100%;
+                                    position: absolute;
+                                    left: 0px;
+                                    top: 0px;
+                                    overflow: hidden;
+                                    border: none;
+                                "
+                                allowfullscreen
+                                title="Movie Player"
+                                allow="web-share"
+                            ></iframe>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="page-radio" class="page">
                     <div class="radio-page-layout">
                         <div class="radio-page-container">
@@ -2460,12 +2450,16 @@
                             "
                         >
                             <div>
-                                <h2 class="section-title" style="margin-bottom: 0.25rem">Radio Admin</h2>
+                                <h2 class="section-title" style="margin-bottom: 0.25rem">Admin</h2>
+                                <div class="search-tabs" id="admin-main-tabs" style="margin-bottom: 1rem">
+                                    <button class="search-tab active" data-target="admin-section-radio">Radio</button>
+                                    <button class="search-tab" data-target="admin-section-movie">Movies</button>
+                                </div>
                                 <p
                                     id="admin-track-count"
                                     style="font-size: 0.8rem; color: var(--muted-foreground); margin: 0"
                                 >
-                                    0 tracks
+                                    0 items
                                 </p>
                             </div>
                             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
@@ -2509,105 +2503,166 @@
                             </div>
                         </div>
 
-                        <div
-                            id="admin-add-track-form"
-                            style="
-                                background: var(--background-secondary);
-                                border-radius: var(--radius);
-                                padding: 1.25rem;
-                                margin-bottom: 1.5rem;
-                            "
-                        >
-                            <h3 style="font-size: 1rem; margin-bottom: 1rem">Add Track</h3>
-                            <div style="display: flex; flex-direction: column; gap: 0.75rem">
-                                <input
-                                    id="admin-track-title"
-                                    type="text"
-                                    placeholder="Track title"
-                                    class="input"
-                                    style="
-                                        width: 100%;
-                                        padding: 0.6rem 0.8rem;
-                                        border-radius: var(--radius);
-                                        border: 1px solid var(--border);
-                                        background: var(--background);
-                                        color: var(--foreground);
-                                    "
-                                />
-                                <input
-                                    id="admin-track-artist"
-                                    type="text"
-                                    placeholder="Artist name"
-                                    class="input"
-                                    style="
-                                        width: 100%;
-                                        padding: 0.6rem 0.8rem;
-                                        border-radius: var(--radius);
-                                        border: 1px solid var(--border);
-                                        background: var(--background);
-                                        color: var(--foreground);
-                                    "
-                                />
-                                <input
-                                    id="admin-track-url"
-                                    type="url"
-                                    placeholder="Audio URL (https://...)"
-                                    class="input"
-                                    style="
-                                        width: 100%;
-                                        padding: 0.6rem 0.8rem;
-                                        border-radius: var(--radius);
-                                        border: 1px solid var(--border);
-                                        background: var(--background);
-                                        color: var(--foreground);
-                                    "
-                                />
-                                <div style="display: flex; gap: 0.5rem">
-                                    <select
-                                        id="admin-track-category"
+                        <div id="admin-section-radio" class="admin-section active" style="display: block;">
+                            <div
+                                id="admin-add-track-form"
+                                style="
+                                    background: var(--background-secondary);
+                                    border-radius: var(--radius);
+                                    padding: 1.25rem;
+                                    margin-bottom: 1.5rem;
+                                "
+                            >
+                                <h3 style="font-size: 1rem; margin-bottom: 1rem">Add Radio Track</h3>
+                                <div style="display: flex; flex-direction: column; gap: 0.75rem">
+                                    <input
+                                        id="admin-track-title"
+                                        type="text"
+                                        placeholder="Track title"
+                                        class="input"
                                         style="
-                                            flex: 1;
+                                            width: 100%;
                                             padding: 0.6rem 0.8rem;
                                             border-radius: var(--radius);
                                             border: 1px solid var(--border);
                                             background: var(--background);
                                             color: var(--foreground);
-                                            font-size: 0.9rem;
                                         "
-                                    ></select>
-                                    <select
-                                        id="admin-track-subcategory"
+                                    />
+                                    <input
+                                        id="admin-track-artist"
+                                        type="text"
+                                        placeholder="Artist name"
+                                        class="input"
                                         style="
-                                            flex: 1;
+                                            width: 100%;
                                             padding: 0.6rem 0.8rem;
                                             border-radius: var(--radius);
                                             border: 1px solid var(--border);
                                             background: var(--background);
                                             color: var(--foreground);
-                                            font-size: 0.9rem;
                                         "
-                                    ></select>
+                                    />
+                                    <input
+                                        id="admin-track-url"
+                                        type="url"
+                                        placeholder="Audio URL (https://...)"
+                                        class="input"
+                                        style="
+                                            width: 100%;
+                                            padding: 0.6rem 0.8rem;
+                                            border-radius: var(--radius);
+                                            border: 1px solid var(--border);
+                                            background: var(--background);
+                                            color: var(--foreground);
+                                        "
+                                    />
+                                    <div style="display: flex; gap: 0.5rem">
+                                        <select
+                                            id="admin-track-category"
+                                            style="
+                                                flex: 1;
+                                                padding: 0.6rem 0.8rem;
+                                                border-radius: var(--radius);
+                                                border: 1px solid var(--border);
+                                                background: var(--background);
+                                                color: var(--foreground);
+                                                font-size: 0.9rem;
+                                            "
+                                        ></select>
+                                        <select
+                                            id="admin-track-subcategory"
+                                            style="
+                                                flex: 1;
+                                                padding: 0.6rem 0.8rem;
+                                                border-radius: var(--radius);
+                                                border: 1px solid var(--border);
+                                                background: var(--background);
+                                                color: var(--foreground);
+                                                font-size: 0.9rem;
+                                            "
+                                        ></select>
+                                    </div>
+                                    <button
+                                        id="admin-add-btn"
+                                        class="btn-primary"
+                                        style="
+                                            align-self: flex-start;
+                                            display: flex;
+                                            align-items: center;
+                                            gap: 0.4rem;
+                                            padding: 0.6rem 1.2rem;
+                                        "
+                                    >
+                                        <use svg="!lucide/plus.svg" size="16" />
+                                        <span>Add Track</span>
+                                    </button>
                                 </div>
-                                <button
-                                    id="admin-add-btn"
-                                    class="btn-primary"
-                                    style="
-                                        align-self: flex-start;
-                                        display: flex;
-                                        align-items: center;
-                                        gap: 0.4rem;
-                                        padding: 0.6rem 1.2rem;
-                                    "
-                                >
-                                    <use svg="!lucide/plus.svg" size="16" />
-                                    <span>Add Track</span>
-                                </button>
                             </div>
+
+                            <div id="admin-category-tabs" class="search-tabs" style="margin-bottom: 0.5rem"></div>
+                            <div id="admin-subcategory-tabs" class="search-tabs" style="margin-bottom: 1rem"></div>
+                            <div id="admin-track-list" style="display: flex; flex-direction: column; gap: 0.5rem"></div>
                         </div>
 
-                        <div id="admin-category-tabs" class="search-tabs" style="margin-bottom: 0.5rem"></div>
-                        <div id="admin-subcategory-tabs" class="search-tabs" style="margin-bottom: 1rem"></div>
-                        <div id="admin-track-list" style="display: flex; flex-direction: column; gap: 0.5rem"></div>
+                        <div id="admin-section-movie" class="admin-section" style="display: none;">
+                            <div
+                                id="admin-add-movie-form"
+                                style="
+                                    background: var(--background-secondary);
+                                    border-radius: var(--radius);
+                                    padding: 1.25rem;
+                                    margin-bottom: 1.5rem;
+                                "
+                            >
+                                <h3 style="font-size: 1rem; margin-bottom: 1rem">Add Movie</h3>
+                                <div style="display: flex; flex-direction: column; gap: 0.75rem">
+                                    <input
+                                        id="admin-movie-title"
+                                        type="text"
+                                        placeholder="Movie title (e.g. សាមកុក-Samkok)"
+                                        class="input"
+                                        style="
+                                            width: 100%;
+                                            padding: 0.6rem 0.8rem;
+                                            border-radius: var(--radius);
+                                            border: 1px solid var(--border);
+                                            background: var(--background);
+                                            color: var(--foreground);
+                                        "
+                                    />
+                                    <input
+                                        id="admin-movie-url"
+                                        type="url"
+                                        placeholder="Dailymotion/Iframe URL (https://...)"
+                                        class="input"
+                                        style="
+                                            width: 100%;
+                                            padding: 0.6rem 0.8rem;
+                                            border-radius: var(--radius);
+                                            border: 1px solid var(--border);
+                                            background: var(--background);
+                                            color: var(--foreground);
+                                        "
+                                    />
+                                    <button
+                                        id="admin-add-movie-btn"
+                                        class="btn-primary"
+                                        style="
+                                            align-self: flex-start;
+                                            display: flex;
+                                            align-items: center;
+                                            gap: 0.4rem;
+                                            padding: 0.6rem 1.2rem;
+                                        "
+                                    >
+                                        <use svg="!lucide/plus.svg" size="16" />
+                                        <span>Add Movie</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="admin-movie-list" style="display: flex; flex-direction: column; gap: 0.5rem"></div>
+                        </div>
                     </section>
                 </div>
 

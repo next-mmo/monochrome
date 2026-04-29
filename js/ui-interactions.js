@@ -666,6 +666,16 @@ export function initializeUIInteractions(player, api, ui) {
         });
     });
 
+    // Movie tabs
+    document.querySelectorAll('.movie-tab').forEach((tab) => {
+        tab.addEventListener('click', () => {
+            const iframe = document.getElementById('movie-iframe');
+            if (iframe && tab.dataset.url) {
+                iframe.src = tab.dataset.url;
+            }
+        });
+    });
+
     // Settings tabs
     document.querySelectorAll('.settings-tab').forEach((tab) => {
         tab.addEventListener('click', () => {

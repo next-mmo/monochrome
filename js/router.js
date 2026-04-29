@@ -104,6 +104,9 @@ export function createRouter(ui) {
             case 'radio':
                 await ui.renderRadioPage();
                 break;
+            case 'movie':
+                await ui.renderMoviePage();
+                break;
             case 'admin':
                 await ui.renderAdminPage();
                 break;

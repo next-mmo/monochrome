@@ -2802,6 +2802,45 @@ export class UIRenderer {
         }
     }
 
+    async renderMoviePage() {
+        this.showPage('movie');
+        
+        const { radioTrackManager } = await import('./radio-tracks.js');
+        const movies = await radioTrackManager.loadTracksByFilter('movie', 'all');
+        
+        const tabsContainer = document.querySelector('.movie-tabs');
+        const iframeContainer = document.getElementById('movie-iframe');
+        
+        if (movies.length === 0) {
+            movies.push({
+                audioUrl: 'https://geo.dailymotion.com/player.html?playlist=xc2odc',
+                title: 'សាមកុក-Samkok',
+            });
+        }
+        
+        // Generate tabs
+        tabsContainer.innerHTML = movies.map((movie, index) => {
+            const isActive = index === 0 ? 'active' : '';
+            return `<button class="search-tab movie-tab ${isActive}" data-url="${movie.audioUrl}">${movie.title}</button>`;
+        }).join('');
+        
+        // Update iframe to the first movie
+        if (iframeContainer && movies[0].audioUrl) {
+            iframeContainer.src = movies[0].audioUrl;
+        }
+
+        // Add event listeners for the generated tabs
+        tabsContainer.querySelectorAll('.movie-tab').forEach((tab) => {
+            tab.addEventListener('click', () => {
+                tabsContainer.querySelectorAll('.movie-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                if (iframeContainer && tab.dataset.url) {
+                    iframeContainer.src = tab.dataset.url;
+                }
+            });
+        });
+    }
+
     async renderAdminPage() {
         this.showPage('admin');
 
@@ -2826,13 +2865,95 @@ export class UIRenderer {
         let filterCategory = 'all';
         let filterSubcategory = 'all';
 
-        // Populate form dropdowns
+        const adminMainTabsEl = document.getElementById('admin-main-tabs');
+        const adminSectionRadio = document.getElementById('admin-section-radio');
+        const adminSectionMovie = document.getElementById('admin-section-movie');
+        
+        if (adminMainTabsEl) {
+            adminMainTabsEl.querySelectorAll('.search-tab').forEach((tab) => {
+                tab.addEventListener('click', () => {
+                    adminMainTabsEl.querySelectorAll('.search-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    
+                    if (tab.dataset.target === 'admin-section-radio') {
+                        adminSectionRadio.style.display = 'block';
+                        adminSectionMovie.style.display = 'none';
+                        renderTrackList();
+                    } else {
+                        adminSectionRadio.style.display = 'none';
+                        adminSectionMovie.style.display = 'block';
+                        renderMovieList();
+                    }
+                });
+            });
+        }
+
+        const movieTitleInput = document.getElementById('admin-movie-title');
+        const movieUrlInput = document.getElementById('admin-movie-url');
+        const addMovieBtn = document.getElementById('admin-add-movie-btn');
+        const movieListEl = document.getElementById('admin-movie-list');
+
+        const renderMovieList = async () => {
+            const movies = await radioTrackManager.loadTracksByFilter('movie', 'all');
+            const allTracks = await radioTrackManager.loadTracks();
+            trackCountEl.textContent = `${allTracks.length} items \u00b7 ${movies.length} movies`;
+
+            if (movies.length === 0) {
+                movieListEl.innerHTML = `
+                    <div style="text-align: center; padding: 2rem; color: var(--muted-foreground);">
+                        <p>No movies found.</p>
+                        <p style="font-size: 0.85rem; margin-top: 0.5rem;">Add a movie above.</p>
+                    </div>`;
+                return;
+            }
+
+            movieListEl.innerHTML = movies.map((track, i) => `
+                <div class="admin-track-row" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; background: var(--background-secondary); border-radius: var(--radius);">
+                    <span style="color: var(--muted-foreground); font-size: 0.8rem; min-width: 1.5rem; text-align: center;">${i + 1}</span>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${track.title}</div>
+                    </div>
+                    <div style="font-size: 0.7rem; color: var(--muted-foreground); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${track.audioUrl}">${track.audioUrl}</div>
+                    <button class="btn-icon admin-remove-movie" data-track-id="${track.id}" title="Remove" style="flex-shrink: 0; color: var(--destructive, #ef4444);">
+                        <use svg="!lucide/x.svg" size="16" />
+                    </button>
+                </div>
+            `).join('');
+
+            movieListEl.querySelectorAll('.admin-remove-movie').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    await radioTrackManager.removeTrack(btn.dataset.trackId);
+                    await renderMovieList();
+                });
+            });
+        };
+
+        if (addMovieBtn) {
+            addMovieBtn.onclick = async () => {
+                const url = movieUrlInput?.value?.trim();
+                const title = movieTitleInput?.value?.trim() || 'Untitled Movie';
+                if (!url) { movieUrlInput?.focus(); return; }
+                await radioTrackManager.addTrack({
+                    title: title,
+                    artistName: 'Movie',
+                    audioUrl: url,
+                    category: 'movie',
+                    subcategory: 'all',
+                });
+                if (movieTitleInput) movieTitleInput.value = '';
+                if (movieUrlInput) movieUrlInput.value = '';
+                await renderMovieList();
+            };
+        }
+
         const populateFormSelects = () => {
-            categorySelect.innerHTML = RADIO_CATEGORIES.map(
+            // Filter out 'movie' category from radio form
+            const filteredCategories = RADIO_CATEGORIES.filter(cat => cat.id !== 'movie');
+            categorySelect.innerHTML = filteredCategories.map(
                 (cat) => `<option value="${cat.id}">${cat.label}</option>`
             ).join('');
             const updateSubOpts = () => {
-                const cat = RADIO_CATEGORIES.find((c) => c.id === categorySelect.value);
+                const cat = filteredCategories.find((c) => c.id === categorySelect.value);
                 const subs = cat?.subs?.filter((s) => s.id !== 'all') || [];
                 subcategorySelect.innerHTML = subs
                     .map((sub) => `<option value="${sub.id}">${sub.label}</option>`)
@@ -2876,7 +2997,8 @@ export class UIRenderer {
             const allTracks = await radioTrackManager.loadTracks();
             const allCount = allTracks.length;
             const htmls = [`<button class="search-tab${filterCategory === 'all' ? ' active' : ''}" data-category="all">All (${allCount})</button>`];
-            for (const cat of RADIO_CATEGORIES) {
+            const filteredCategories = RADIO_CATEGORIES.filter(cat => cat.id !== 'movie');
+            for (const cat of filteredCategories) {
                 const tracks = await radioTrackManager.loadTracksByFilter(cat.id, null);
                 htmls.push(
                     `<button class="search-tab${filterCategory === cat.id ? ' active' : ''}" data-category="${cat.id}">${cat.label} (${tracks.length})</button>`
@@ -2898,11 +3020,15 @@ export class UIRenderer {
         const subColors = { khmer: '#f59e0b', english: '#10b981', thai: '#ec4899', kpop: '#6366f1' };
 
         const renderTrackList = async () => {
-            const allTracks = await radioTrackManager.loadTracks();
-            const tracks = await radioTrackManager.loadTracksByFilter(
+            let allTracks = await radioTrackManager.loadTracks();
+            allTracks = allTracks.filter(t => t.category !== 'movie'); // Hide movies in radio admin
+            
+            let tracks = await radioTrackManager.loadTracksByFilter(
                 filterCategory === 'all' ? null : filterCategory,
                 filterSubcategory === 'all' ? null : filterSubcategory
             );
+            tracks = tracks.filter(t => t.category !== 'movie'); // Hide movies in radio admin
+            
             trackCountEl.textContent = `${allTracks.length} total \u00b7 ${tracks.length} shown`;
 
             if (tracks.length === 0) {

@@ -56,6 +56,20 @@ const defaultTracks = [
         isLocal: false,
         duration: 0,
     },
+    {
+        id: 'movie-samkok',
+        title: 'សាមកុក-Samkok',
+        artist: { name: 'Movie' },
+        artists: [{ name: 'Movie' }],
+        album: { name: 'Movies' },
+        audioUrl: 'https://geo.dailymotion.com/player.html?playlist=xc2odc',
+        category: 'movie',
+        subcategory: 'khmer',
+        type: 'track',
+        provider: 'custom',
+        isLocal: false,
+        duration: 0,
+    },
 ];
 
 async function loadTracks() {
