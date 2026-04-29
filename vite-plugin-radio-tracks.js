@@ -8,7 +8,7 @@ export default function radioTracksPlugin() {
             server.middlewares.use((req, res, next) => {
                 if (req.url === '/api/radio-tracks' && req.method === 'POST') {
                     let body = '';
-                    req.on('data', chunk => {
+                    req.on('data', (chunk) => {
                         body += chunk.toString();
                     });
                     req.on('end', () => {
@@ -27,6 +27,6 @@ export default function radioTracksPlugin() {
                 }
                 next();
             });
-        }
+        },
     };
 }

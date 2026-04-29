@@ -1341,7 +1341,7 @@ export class Player {
                 this.radioSubcategory || null
             );
             if (tracks.length === 0) return;
-            
+
             if (this._initialRadioLoad) {
                 this._initialRadioLoad = false;
                 try {
@@ -1351,7 +1351,7 @@ export class Player {
                         if (saved.category === this.radioCategory && saved.subcategory === this.radioSubcategory) {
                             const elapsedSinceStart = Date.now() - saved.trackStartTime;
                             if (elapsedSinceStart > 0 && elapsedSinceStart < saved.duration) {
-                                const savedTrack = tracks.find(t => t.id === saved.trackId);
+                                const savedTrack = tracks.find((t) => t.id === saved.trackId);
                                 if (savedTrack) {
                                     await this.setQueue([savedTrack], 0, true);
                                     await this.playTrackFromQueue(elapsedSinceStart / 1000);
@@ -1364,13 +1364,13 @@ export class Player {
                     console.warn('Failed to parse radio state', e);
                 }
             }
-            
+
             let availableTracks = tracks;
             if (tracks.length > 1 && this.currentTrack) {
-                availableTracks = tracks.filter(t => t.id !== this.currentTrack.id);
+                availableTracks = tracks.filter((t) => t.id !== this.currentTrack.id);
             }
             const randomTrack = availableTracks[Math.floor(Math.random() * availableTracks.length)];
-            
+
             await this.setQueue([randomTrack], 0, true);
             await this.playTrackFromQueue();
             return;

@@ -2872,10 +2872,13 @@ export class UIRenderer {
         };
 
         const renderCatTabs = async () => {
-            categoryTabsEl.innerHTML = '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
+            categoryTabsEl.innerHTML =
+                '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
             const allTracks = await radioTrackManager.loadTracks();
             const allCount = allTracks.length;
-            const htmls = [`<button class="search-tab${filterCategory === 'all' ? ' active' : ''}" data-category="all">All (${allCount})</button>`];
+            const htmls = [
+                `<button class="search-tab${filterCategory === 'all' ? ' active' : ''}" data-category="all">All (${allCount})</button>`,
+            ];
             for (const cat of RADIO_CATEGORIES) {
                 const tracks = await radioTrackManager.loadTracksByFilter(cat.id, null);
                 htmls.push(
@@ -2947,7 +2950,10 @@ export class UIRenderer {
         if (addBtn) {
             addBtn.onclick = async () => {
                 const url = urlInput?.value?.trim();
-                if (!url) { urlInput?.focus(); return; }
+                if (!url) {
+                    urlInput?.focus();
+                    return;
+                }
                 await radioTrackManager.addTrack({
                     title: titleInput?.value?.trim() || 'Untitled',
                     artistName: artistInput?.value?.trim() || 'Unknown',
