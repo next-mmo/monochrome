@@ -12336,7 +12336,6 @@ body.radio-active .progress-container {
     position: relative;
     background: rgb(var(--highlight-rgb), 0.05);
     backdrop-filter: blur(16px);
-    backdrop-filter: blur(16px);
     border: 1px solid rgb(var(--highlight-rgb), 0.1);
     border-radius: 24px;
     padding: 2rem 1.5rem;
