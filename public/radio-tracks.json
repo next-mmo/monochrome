@@ -1,0 +1,90 @@
+[
+  {
+    "id": "radio-khmer-podcast",
+    "title": "How to Live on 24 hours a day",
+    "artist": {
+      "name": "Khmer Podcast"
+    },
+    "artists": [
+      {
+        "name": "Khmer Podcast"
+      }
+    ],
+    "album": {
+      "name": "Radio Stream"
+    },
+    "audioUrl": "https://weread-oss.weread.asia/Audio/How to Live on 24 hours a day_mixdown.mp3",
+    "category": "podcast",
+    "subcategory": "khmer",
+    "type": "track",
+    "provider": "custom",
+    "isLocal": false,
+    "duration": 0
+  },
+  {
+    "id": "radio-1777485054818",
+    "title": "ស្គាល់ខ្លួនឯង  (Bun Park)",
+    "artist": {
+      "name": "Bun Park"
+    },
+    "artists": [
+      {
+        "name": "Bun Park"
+      }
+    ],
+    "album": {
+      "name": "Radio Stream"
+    },
+    "audioUrl": "https://weread-oss.weread.asia/Audio/Self-Insight_mixdown.mp3",
+    "category": "podcast",
+    "subcategory": "khmer",
+    "type": "track",
+    "provider": "custom",
+    "isLocal": false,
+    "duration": 0
+  },
+  {
+    "id": "radio-1777485360242",
+    "title": "ផ្នត់គំនិតអ្នកវិនិយោគ  (Bun Park)",
+    "artist": {
+      "name": "Bun Park"
+    },
+    "artists": [
+      {
+        "name": "Bun Park"
+      }
+    ],
+    "album": {
+      "name": "Radio Stream"
+    },
+    "audioUrl": "https://weread-oss.weread.asia/Audio/The Venture Mindset_mixdown (1).mp3",
+    "category": "podcast",
+    "subcategory": "khmer",
+    "type": "track",
+    "provider": "custom",
+    "isLocal": false,
+    "duration": 0
+  },
+  {
+    "id": "radio-1777485510152",
+    "title": "តិចនិចហ្វឹកហាត់ខួរក្បាល  (Bun Park)",
+    "artist": {
+      "name": "(Bun Park"
+    },
+    "artists": [
+      {
+        "name": "(Bun Park"
+      }
+    ],
+    "album": {
+      "name": "Radio Stream"
+    },
+    "audioUrl": "https://weread-oss.weread.asia/Audio/The Mind-Body Methods_mixdown (1).mp3",
+    "category": "podcast",
+    "subcategory": "khmer",
+    "type": "track",
+    "provider": "custom",
+    "isLocal": false,
+    "duration": 0
+  }
+]

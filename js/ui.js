@@ -2711,8 +2711,16 @@ export class UIRenderer {
         const categoryTabsEl = document.getElementById('radio-category-tabs');
         const subcategoryTabsEl = document.getElementById('radio-subcategory-tabs');
 
-        let selectedCategory = RADIO_CATEGORIES[0]?.id || 'podcast';
-        let selectedSubcategory = 'all';
+        const urlParams = new URLSearchParams(window.location.search);
+        let selectedCategory = urlParams.get('category') || RADIO_CATEGORIES[0]?.id || 'podcast';
+        let selectedSubcategory = urlParams.get('subcategory') || 'all';
+
+        const updateURLParams = () => {
+            const url = new URL(window.location);
+            url.searchParams.set('category', selectedCategory);
+            url.searchParams.set('subcategory', selectedSubcategory);
+            window.history.replaceState({}, '', url);
+        };
 
         const getActiveCat = () => RADIO_CATEGORIES.find(c => c.id === selectedCategory);
 
@@ -2733,6 +2741,7 @@ export class UIRenderer {
                 tab.addEventListener('click', () => {
                     selectedSubcategory = tab.dataset.sub;
                     this.player.radioSubcategory = selectedSubcategory;
+                    updateURLParams();
                     renderSubTabs();
                 });
             });
@@ -2752,6 +2761,7 @@ export class UIRenderer {
                     selectedSubcategory = 'all';
                     this.player.radioCategory = selectedCategory;
                     this.player.radioSubcategory = selectedSubcategory;
+                    updateURLParams();
                     renderCatTabs();
                     renderSubTabs();
                 });
@@ -2778,6 +2788,7 @@ export class UIRenderer {
                 this.player.is247Radio = true;
                 this.player.radioCategory = selectedCategory;
                 this.player.radioSubcategory = selectedSubcategory;
+                this.player._initialRadioLoad = true;
                 this.player.playNext();
                 playBtn.innerHTML = '<use svg="!lucide/radio.svg" size="24" style="margin-right: 0.5rem;"/> Playing Radio...';
             };
@@ -2794,6 +2805,9 @@ export class UIRenderer {
         const addBtn = document.getElementById('admin-add-btn');
         const clearBtn = document.getElementById('admin-clear-btn');
         const resetBtn = document.getElementById('admin-reset-btn');
+        const exportBtn = document.getElementById('admin-export-btn');
+        const importBtn = document.getElementById('admin-import-btn');
+        const importFile = document.getElementById('admin-import-file');
         const titleInput = document.getElementById('admin-track-title');
         const artistInput = document.getElementById('admin-track-artist');
         const urlInput = document.getElementById('admin-track-url');
@@ -2843,7 +2857,8 @@ export class UIRenderer {
 
         const renderCatTabs = async () => {
             categoryTabsEl.innerHTML = '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
-            const allCount = radioTrackManager.loadTracks().length;
+            const allTracks = await radioTrackManager.loadTracks();
+            const allCount = allTracks.length;
             const htmls = [`<button class="search-tab${filterCategory === 'all' ? ' active' : ''}" data-category="all">All (${allCount})</button>`];
             for (const cat of RADIO_CATEGORIES) {
                 const tracks = await radioTrackManager.loadTracksByFilter(cat.id, null);
@@ -2865,7 +2880,7 @@ export class UIRenderer {
         const subColors = { khmer: '#f59e0b', english: '#10b981', thai: '#ec4899', kpop: '#6366f1' };
 
         const renderTrackList = async () => {
-            const allTracks = radioTrackManager.loadTracks();
+            const allTracks = await radioTrackManager.loadTracks();
             const tracks = await radioTrackManager.loadTracksByFilter(
                 filterCategory === 'all' ? null : filterCategory,
                 filterSubcategory === 'all' ? null : filterSubcategory
@@ -2899,7 +2914,7 @@ export class UIRenderer {
 
             trackListEl.querySelectorAll('.admin-remove-track').forEach(btn => {
                 btn.addEventListener('click', async () => {
-                    radioTrackManager.removeTrack(btn.dataset.trackId);
+                    await radioTrackManager.removeTrack(btn.dataset.trackId);
                     await renderCatTabs();
                     await renderSubTabs();
                     await renderTrackList();
@@ -2911,7 +2926,7 @@ export class UIRenderer {
             addBtn.onclick = async () => {
                 const url = urlInput?.value?.trim();
                 if (!url) { urlInput?.focus(); return; }
-                radioTrackManager.addTrack({
+                await radioTrackManager.addTrack({
                     title: titleInput?.value?.trim() || 'Untitled',
                     artistName: artistInput?.value?.trim() || 'Unknown',
                     audioUrl: url,
@@ -2930,7 +2945,7 @@ export class UIRenderer {
         if (clearBtn) {
             clearBtn.onclick = async () => {
                 if (confirm('Remove all radio tracks?')) {
-                    radioTrackManager.clearTracks();
+                    await radioTrackManager.clearTracks();
                     await renderCatTabs();
                     await renderSubTabs();
                     await renderTrackList();
@@ -2940,10 +2955,55 @@ export class UIRenderer {
 
         if (resetBtn) {
             resetBtn.onclick = async () => {
-                radioTrackManager.resetToDefaults();
-                await renderCatTabs();
-                await renderSubTabs();
-                await renderTrackList();
+                if (confirm('Reset to default radio tracks?')) {
+                    await radioTrackManager.resetToDefaults();
+                    await renderCatTabs();
+                    await renderSubTabs();
+                    await renderTrackList();
+                }
+            };
+        }
+
+        if (exportBtn) {
+            exportBtn.onclick = async () => {
+                const tracks = await radioTrackManager.loadTracks();
+                const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(tracks, null, 2));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute('href', dataStr);
+                downloadAnchorNode.setAttribute('download', 'radio-tracks.json');
+                document.body.appendChild(downloadAnchorNode); // required for firefox
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
+            };
+        }
+
+        if (importBtn && importFile) {
+            importBtn.onclick = () => {
+                importFile.click();
+            };
+            importFile.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const importedTracks = JSON.parse(event.target.result);
+                        if (!Array.isArray(importedTracks)) {
+                            alert('Invalid file format. Must be a JSON array.');
+                            return;
+                        }
+                        if (confirm(`Import ${importedTracks.length} tracks? This will replace your current tracks.`)) {
+                            await radioTrackManager.saveTracks(importedTracks);
+                            await renderCatTabs();
+                            await renderSubTabs();
+                            await renderTrackList();
+                        }
+                    } catch (err) {
+                        alert('Error parsing JSON file.');
+                    }
+                };
+                reader.readAsText(file);
+                importFile.value = ''; // reset so the same file can be selected again
             };
         }
 

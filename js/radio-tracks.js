@@ -58,15 +58,15 @@ const defaultTracks = [
     }
 ];
 
-function loadTracks() {
+async function loadTracks() {
     try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-            const parsed = JSON.parse(stored);
+        const res = await fetch(`/radio-tracks.json?t=${Date.now()}`);
+        if (res.ok) {
+            const parsed = await res.json();
             if (Array.isArray(parsed) && parsed.length > 0) return parsed;
         }
     } catch (e) {
-        console.warn('Failed to load radio tracks from storage', e);
+        console.warn('Failed to load radio tracks from API, falling back', e);
     }
     return [...defaultTracks];
 }
@@ -91,7 +91,7 @@ async function loadTracksByFilter(category, subcategory) {
         }
     }
 
-    let tracks = loadTracks();
+    let tracks = await loadTracks();
     if (category && category !== 'all') {
         tracks = tracks.filter(t => t.category === category);
     }
@@ -101,12 +101,20 @@ async function loadTracksByFilter(category, subcategory) {
     return tracks;
 }
 
-function saveTracks(tracks) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(tracks));
+async function saveTracks(tracks) {
+    try {
+        await fetch('/api/radio-tracks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(tracks)
+        });
+    } catch (e) {
+        console.error('Failed to save radio tracks via API', e);
+    }
 }
 
-function addTrack(track) {
-    const tracks = loadTracks();
+async function addTrack(track) {
+    const tracks = await loadTracks();
     tracks.push({
         id: track.id || `radio-${Date.now()}`,
         title: track.title || 'Untitled',
@@ -121,27 +129,30 @@ function addTrack(track) {
         isLocal: false,
         duration: 0
     });
-    saveTracks(tracks);
+    await saveTracks(tracks);
     return tracks;
 }
 
-function removeTrack(trackId) {
-    const tracks = loadTracks().filter(t => t.id !== trackId);
-    saveTracks(tracks);
-    return tracks;
+async function removeTrack(trackId) {
+    const tracks = await loadTracks();
+    const filtered = tracks.filter(t => t.id !== trackId);
+    await saveTracks(filtered);
+    return filtered;
 }
 
-function clearTracks() {
-    saveTracks([]);
+async function clearTracks() {
+    await saveTracks([]);
     return [];
 }
 
-function resetToDefaults() {
-    saveTracks([...defaultTracks]);
+async function resetToDefaults() {
+    await saveTracks([...defaultTracks]);
     return [...defaultTracks];
 }
 
-export const radioTracks = loadTracks();
+// Initial tracks might not be loaded synchronously anymore, so we remove the synchronous export 
+// and clients should use `await radioTrackManager.loadTracks()` instead.
+// export const radioTracks = loadTracks();
 export const radioTrackManager = {
     loadTracks,
     loadTracksByFilter,

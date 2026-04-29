@@ -478,6 +478,20 @@ export async function initializePlayerEvents(player, audioPlayer, scrobbler, ui)
                 currentTimeEl.textContent = formatTime(currentTime);
 
                 listeningTracker.onTimeUpdate(currentTime, duration);
+                
+                if (player.is247Radio && player.currentTrack) {
+                    try {
+                        localStorage.setItem('monochrome_radio_state', JSON.stringify({
+                            category: player.radioCategory,
+                            subcategory: player.radioSubcategory,
+                            trackId: player.currentTrack.id,
+                            trackStartTime: Date.now() - (currentTime * 1000),
+                            duration: duration * 1000
+                        }));
+                    } catch(e) {
+                        // Ignore localstorage errors
+                    }
+                }
 
                 if (currentTime >= 10 && player.currentTrack && player.currentTrack.id !== historyLoggedTrackId) {
                     historyLoggedTrackId = player.currentTrack.id;

@@ -1338,7 +1338,36 @@ export class Player {
             const { radioTrackManager } = await import('./radio-tracks.js');
             const tracks = await radioTrackManager.loadTracksByFilter(this.radioCategory || null, this.radioSubcategory || null);
             if (tracks.length === 0) return;
-            const randomTrack = tracks[Math.floor(Math.random() * tracks.length)];
+            
+            if (this._initialRadioLoad) {
+                this._initialRadioLoad = false;
+                try {
+                    const savedStr = localStorage.getItem('monochrome_radio_state');
+                    if (savedStr) {
+                        const saved = JSON.parse(savedStr);
+                        if (saved.category === this.radioCategory && saved.subcategory === this.radioSubcategory) {
+                            const elapsedSinceStart = Date.now() - saved.trackStartTime;
+                            if (elapsedSinceStart > 0 && elapsedSinceStart < saved.duration) {
+                                const savedTrack = tracks.find(t => t.id === saved.trackId);
+                                if (savedTrack) {
+                                    await this.setQueue([savedTrack], 0, true);
+                                    await this.playTrackFromQueue(elapsedSinceStart / 1000);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Failed to parse radio state', e);
+                }
+            }
+            
+            let availableTracks = tracks;
+            if (tracks.length > 1 && this.currentTrack) {
+                availableTracks = tracks.filter(t => t.id !== this.currentTrack.id);
+            }
+            const randomTrack = availableTracks[Math.floor(Math.random() * availableTracks.length)];
+            
             await this.setQueue([randomTrack], 0, true);
             await this.playTrackFromQueue();
             return;

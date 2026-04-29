@@ -5,6 +5,7 @@ import authGatePlugin from './vite-plugin-auth-gate.js';
 import blobAssetPlugin from './vite-plugin-blob.js';
 import svgUse from './vite-plugin-svg-use.js';
 import uploadPlugin from './vite-plugin-upload.js';
+import radioTracksPlugin from './vite-plugin-radio-tracks.js';
 // import purgecss from 'vite-plugin-purgecss';
 import { playwright } from '@vitest/browser-playwright';
 import { execSync } from 'child_process';
@@ -108,6 +109,7 @@ export default defineConfig((_options) => {
             uploadPlugin(),
             blobAssetPlugin(),
             svgUse(),
+            radioTracksPlugin(),
             VitePWA({
                 registerType: 'autoUpdate',
                 workbox: {
