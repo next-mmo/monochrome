@@ -1679,7 +1679,7 @@
             <aside class="sidebar">
                 <div class="sidebar-content">
                     <div class="sidebar-logo">
-                        <a href="/" class="sidebar-logo-link">
+                        <a href="/radio" class="sidebar-logo-link">
                             <use svg="./images/monochrome-logo.svg" size="200" class="app-logo" />
                             <span>Monochrome</span>
                         </a>
@@ -1695,10 +1695,11 @@
 
                     <nav class="sidebar-nav main">
                         <ul>
-                            <li class="nav-item" id="sidebar-nav-home">
-                                <a href="/">
-                                    <use svg="!lucide/house.svg" size="24" />
-                                    <span>Home</span>
+
+                            <li class="nav-item" id="sidebar-nav-radio">
+                                <a href="/radio">
+                                    <use svg="!lucide/radio.svg" size="24" />
+                                    <span>24/7 Radio</span>
                                 </a>
                             </li>
                             <li class="nav-item" id="sidebar-nav-offline">
@@ -1734,18 +1735,7 @@
                                     <span>Recent</span>
                                 </a>
                             </li>
-                            <li class="nav-item" id="sidebar-nav-unreleased">
-                                <a href="/unreleased">
-                                    <use svg="./images/squares.svg" size="24" />
-                                    <span>Unreleased</span>
-                                </a>
-                            </li>
-                            <li class="nav-item" id="sidebar-nav-donate">
-                                <a id="sidebar-donate-link" href="/donate">
-                                    <use svg="!lucide/hand-heart.svg" size="24" />
-                                    <span>Donate</span>
-                                </a>
-                            </li>
+
                             <li class="nav-item" id="sidebar-nav-settings">
                                 <a href="/settings">
                                     <use svg="!lucide/settings.svg" size="24" />
@@ -2406,6 +2396,68 @@
                     <div class="search-tab-content" id="search-tab-podcasts">
                         <div class="card-grid" id="search-podcasts-container"></div>
                     </div>
+                </div>
+
+                <div id="page-radio" class="page">
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80vh;">
+                    <div style="text-align: center; max-width: 600px; padding: 2rem; width: 100%;">
+                        <h2 style="font-size: 2.5rem; margin-bottom: 1rem;">24/7 Radio</h2>
+                        <p style="color: var(--muted-foreground); margin-bottom: 1.5rem;">Continuous stream. No skips, no seeking. Just vibes.</p>
+                        <div id="radio-category-tabs" class="search-tabs" style="justify-content: center; margin-bottom: 0.5rem;"></div>
+                        <div id="radio-subcategory-tabs" class="search-tabs" style="justify-content: center; margin-bottom: 1.5rem;"></div>
+                        <div id="radio-current-track" style="background: var(--background-secondary); border-radius: var(--radius); padding: 2rem; margin-bottom: 2rem;">
+                            <img id="radio-cover" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" style="width: 200px; height: 200px; border-radius: var(--radius); margin-bottom: 1rem; object-fit: cover;" />
+                            <h3 id="radio-title" style="font-size: 1.5rem; margin-bottom: 0.5rem;">Loading...</h3>
+                            <p id="radio-artist" style="color: var(--muted-foreground);"></p>
+                            <p id="radio-category-label" style="font-size: 0.75rem; color: var(--muted-foreground); margin-top: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;"></p>
+                        </div>
+                        <button id="radio-play-btn" class="btn-primary" style="font-size: 1.2rem; padding: 1rem 2rem; border-radius: 50px;">
+                            Start Radio
+                        </button>
+                    </div>
+                    </div>
+                </div>
+
+                <div id="page-admin" class="page">
+                    <section class="content-section" style="max-width: 800px; margin: 0 auto;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.75rem;">
+                            <div>
+                                <h2 class="section-title" style="margin-bottom: 0.25rem">Radio Admin</h2>
+                                <p id="admin-track-count" style="font-size: 0.8rem; color: var(--muted-foreground); margin: 0">0 tracks</p>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button id="admin-reset-btn" class="btn-secondary" title="Reset to Defaults" style="display: flex; align-items: center; gap: 0.4rem;">
+                                    <use svg="!lucide/rotate-ccw.svg" size="16" />
+                                    <span>Reset</span>
+                                </button>
+                                <button id="admin-clear-btn" class="btn-secondary" title="Remove All Tracks" style="display: flex; align-items: center; gap: 0.4rem;">
+                                    <use svg="!lucide/trash-2.svg" size="16" />
+                                    <span>Clear All</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="admin-add-track-form" style="background: var(--background-secondary); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.5rem;">
+                            <h3 style="font-size: 1rem; margin-bottom: 1rem;">Add Track</h3>
+                            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                <input id="admin-track-title" type="text" placeholder="Track title" class="input" style="width: 100%; padding: 0.6rem 0.8rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--background); color: var(--foreground);" />
+                                <input id="admin-track-artist" type="text" placeholder="Artist name" class="input" style="width: 100%; padding: 0.6rem 0.8rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--background); color: var(--foreground);" />
+                                <input id="admin-track-url" type="url" placeholder="Audio URL (https://...)" class="input" style="width: 100%; padding: 0.6rem 0.8rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--background); color: var(--foreground);" />
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <select id="admin-track-category" style="flex: 1; padding: 0.6rem 0.8rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--background); color: var(--foreground); font-size: 0.9rem;"></select>
+                                    <select id="admin-track-subcategory" style="flex: 1; padding: 0.6rem 0.8rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--background); color: var(--foreground); font-size: 0.9rem;"></select>
+                                </div>
+                                <button id="admin-add-btn" class="btn-primary" style="align-self: flex-start; display: flex; align-items: center; gap: 0.4rem; padding: 0.6rem 1.2rem;">
+                                    <use svg="!lucide/plus.svg" size="16" />
+                                    <span>Add Track</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="admin-category-tabs" class="search-tabs" style="margin-bottom: 0.5rem;"></div>
+                        <div id="admin-subcategory-tabs" class="search-tabs" style="margin-bottom: 1rem;"></div>
+                        <div id="admin-track-list" style="display: flex; flex-direction: column; gap: 0.5rem;"></div>
+                    </section>
                 </div>
 
                 <div id="page-library" class="page">
@@ -3761,18 +3813,7 @@
                                             <span class="slider"></span>
                                         </label>
                                     </div>
-                                    <div class="setting-item">
-                                        <div class="info">
-                                            <span class="label">Show Unreleased in Sidebar</span>
-                                            <span class="description"
-                                                >Display the Unreleased link in the sidebar navigation</span
-                                            >
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" id="sidebar-show-unreleased-toggle" checked />
-                                            <span class="slider"></span>
-                                        </label>
-                                    </div>
+
                                     <div class="setting-item">
                                         <div class="info">
                                             <span class="label">Show Offline in Sidebar</span>
@@ -3785,18 +3826,7 @@
                                             <span class="slider"></span>
                                         </label>
                                     </div>
-                                    <div class="setting-item">
-                                        <div class="info">
-                                            <span class="label">Show Donate in Sidebar</span>
-                                            <span class="description"
-                                                >Display the Donate link in the sidebar navigation</span
-                                            >
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" id="sidebar-show-donate-toggle" checked />
-                                            <span class="slider"></span>
-                                        </label>
-                                    </div>
+
                                     <div class="setting-item">
                                         <div class="info">
                                             <span class="label">Show Settings in Sidebar</span>

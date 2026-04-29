@@ -12272,3 +12272,18 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
     opacity: 0.8;
     vertical-align: middle;
 }
+
+/* Radio Mode Styles */
+body.radio-active #prev-btn,
+body.radio-active #next-btn,
+body.radio-active #shuffle-btn,
+body.radio-active #repeat-btn,
+body.radio-active .progress-container,
+body.radio-active #queue-btn {
+    pointer-events: none !important;
+    opacity: 0.3 !important;
+}
+
+body.radio-active .progress-container {
+    opacity: 0.5 !important;
+}

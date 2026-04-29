@@ -1334,6 +1334,16 @@ export class Player {
     }
 
     async playNext(recursiveCount = 0) {
+        if (this.is247Radio) {
+            const { radioTrackManager } = await import('./radio-tracks.js');
+            const tracks = await radioTrackManager.loadTracksByFilter(this.radioCategory || null, this.radioSubcategory || null);
+            if (tracks.length === 0) return;
+            const randomTrack = tracks[Math.floor(Math.random() * tracks.length)];
+            await this.setQueue([randomTrack], 0, true);
+            await this.playTrackFromQueue();
+            return;
+        }
+
         const currentQueue = this.getCurrentQueue();
         const isLastTrack = this.currentQueueIndex >= currentQueue.length - 1;
 
@@ -1808,6 +1818,10 @@ export class Player {
     async setQueue(tracks, startIndex = 0, isRadio = false) {
         if (!isRadio) {
             this.disableRadio();
+            document.body.classList.remove('radio-active');
+            this.is247Radio = false;
+        } else {
+            this.is247Radio = true;
         }
         this.queue = tracks;
         this.currentQueueIndex = startIndex;
