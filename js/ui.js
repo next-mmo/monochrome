@@ -399,7 +399,9 @@ export class UIRenderer {
                         fsDownloadBtn.classList.toggle('active', isOffline);
                         fsDownloadBtn.title = isOffline ? 'Remove from Offline' : 'Save Offline';
                     }
-                } catch { /* ignore offline check failures */ }
+                } catch {
+                    /* ignore offline check failures */
+                }
             }
         } else {
             if (likeBtn) likeBtn.style.display = 'none';

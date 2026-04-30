@@ -1386,8 +1386,14 @@ export async function handleTrackAction(
             // Update save-offline button states
             const dlBtn = document.getElementById('download-current-btn');
             const fsDlBtn = document.getElementById('fs-download-btn');
-            if (dlBtn) { dlBtn.classList.remove('active'); dlBtn.title = 'Save Offline'; }
-            if (fsDlBtn) { fsDlBtn.classList.remove('active'); fsDlBtn.title = 'Save Offline'; }
+            if (dlBtn) {
+                dlBtn.classList.remove('active');
+                dlBtn.title = 'Save Offline';
+            }
+            if (fsDlBtn) {
+                fsDlBtn.classList.remove('active');
+                fsDlBtn.title = 'Save Offline';
+            }
         } else {
             // Create a progress notification for offline saving
             const container =
@@ -1426,7 +1432,7 @@ export async function handleTrackAction(
             try {
                 let blob;
                 const streamUrl = item.url || item.streamUrl || item.audioUrl || (item.isLocal ? item.path : null);
-                
+
                 if (streamUrl && !item.id?.toString().match(/^\d+$/)) {
                     // For radio/local tracks with direct URLs, bypass Tidal API
                     statusEl.textContent = 'Downloading direct stream...';
@@ -1484,8 +1490,14 @@ export async function handleTrackAction(
                 // Update save-offline button states
                 const dlBtn = document.getElementById('download-current-btn');
                 const fsDlBtn = document.getElementById('fs-download-btn');
-                if (dlBtn) { dlBtn.classList.add('active'); dlBtn.title = 'Remove from Offline'; }
-                if (fsDlBtn) { fsDlBtn.classList.add('active'); fsDlBtn.title = 'Remove from Offline'; }
+                if (dlBtn) {
+                    dlBtn.classList.add('active');
+                    dlBtn.title = 'Remove from Offline';
+                }
+                if (fsDlBtn) {
+                    fsDlBtn.classList.add('active');
+                    fsDlBtn.title = 'Remove from Offline';
+                }
 
                 setTimeout(() => {
                     taskEl.style.animation = 'slide-out 0.3s ease forwards';
