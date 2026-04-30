@@ -90,7 +90,7 @@ class GeniusManager {
         const token = this.getToken();
 
         const url = `https://api.genius.com/search?q=${query}&access_token=${token}`;
-        const response = await fetchWithProxyRetry(getProxyUrl(url));
+        const response = await fetch(url);
 
         if (!response.ok) throw new Error('Failed to search Genius');
 
@@ -111,7 +111,7 @@ class GeniusManager {
     async getReferents(songId) {
         const token = this.getToken();
         const url = `https://api.genius.com/referents?song_id=${songId}&text_format=plain&per_page=50&access_token=${token}`;
-        const response = await fetchWithProxyRetry(getProxyUrl(url));
+        const response = await fetch(url);
 
         if (!response.ok) throw new Error('Failed to fetch annotations');
 

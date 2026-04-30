@@ -383,6 +383,24 @@ export class UIRenderer {
                 if (shouldHideLikes) fsAddPlaylistBtn.style.display = 'none';
                 else fsAddPlaylistBtn.style.display = 'flex';
             }
+
+            // Update save-offline button state
+            const downloadBtn = document.getElementById('download-current-btn');
+            const fsDownloadBtn = document.getElementById('fs-download-btn');
+            if (downloadBtn || fsDownloadBtn) {
+                try {
+                    const { isTrackOffline } = await import('./offline.js');
+                    const isOffline = await isTrackOffline(track.id);
+                    if (downloadBtn) {
+                        downloadBtn.classList.toggle('active', isOffline);
+                        downloadBtn.title = isOffline ? 'Remove from Offline' : 'Save Offline';
+                    }
+                    if (fsDownloadBtn) {
+                        fsDownloadBtn.classList.toggle('active', isOffline);
+                        fsDownloadBtn.title = isOffline ? 'Remove from Offline' : 'Save Offline';
+                    }
+                } catch { /* ignore offline check failures */ }
+            }
         } else {
             if (likeBtn) likeBtn.style.display = 'none';
             if (addPlaylistBtn) addPlaylistBtn.style.setProperty('display', 'none', 'important');
@@ -390,6 +408,18 @@ export class UIRenderer {
             if (lyricsBtn) lyricsBtn.style.display = 'none';
             if (fsLikeBtn) fsLikeBtn.style.display = 'none';
             if (fsAddPlaylistBtn) fsAddPlaylistBtn.style.display = 'none';
+
+            // Reset save-offline button state
+            const downloadBtn = document.getElementById('download-current-btn');
+            const fsDownloadBtn = document.getElementById('fs-download-btn');
+            if (downloadBtn) {
+                downloadBtn.classList.remove('active');
+                downloadBtn.title = 'Save Offline';
+            }
+            if (fsDownloadBtn) {
+                fsDownloadBtn.classList.remove('active');
+                fsDownloadBtn.title = 'Save Offline';
+            }
         }
     }
 
@@ -2815,7 +2845,7 @@ export class UIRenderer {
                 this.player._initialRadioLoad = true;
                 this.player.playNext();
                 playBtn.innerHTML =
-                    '<use svg="!lucide/radio.svg" size="24" style="margin-right: 0.5rem;"/> Playing Radio...';
+                    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 0.5rem;"><circle cx="12" cy="12" r="2"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/><path d="M7.76 16.24a6 6 0 0 1 0-8.48"/><path d="M16.24 7.76a6 6 0 0 1 0 8.48"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg> Playing Radio...';
             };
         }
     }
@@ -2937,7 +2967,7 @@ export class UIRenderer {
                     </div>
                     <div style="font-size: 0.7rem; color: var(--muted-foreground); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${track.audioUrl}">${track.audioUrl}</div>
                     <button class="btn-icon admin-remove-movie" data-track-id="${track.id}" title="Remove" style="flex-shrink: 0; color: var(--destructive, #ef4444);">
-                        <use svg="!lucide/x.svg" size="16" />
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                     </button>
                 </div>
             `
@@ -3083,7 +3113,7 @@ export class UIRenderer {
                     </div>
                     <div style="font-size: 0.7rem; color: var(--muted-foreground); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${track.audioUrl}">${track.audioUrl}</div>
                     <button class="btn-icon admin-remove-track" data-track-id="${track.id}" title="Remove" style="flex-shrink: 0; color: var(--destructive, #ef4444);">
-                        <use svg="!lucide/x.svg" size="16" />
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                     </button>
                 </div>
             `

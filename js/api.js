@@ -1788,7 +1788,7 @@ export class LosslessAPI {
             } else if (streamUrl.includes('.m3u8') || streamUrl.includes('application/vnd.apple.mpegurl')) {
                 try {
                     const downloader = new HlsDownloader();
-                    blob = await downloader.downloadHlsStream(getProxyUrl(streamUrl), {
+                    blob = await downloader.downloadHlsStream(streamUrl, {
                         signal: options.signal,
                         onProgress,
                     });
@@ -1813,10 +1813,14 @@ export class LosslessAPI {
                     /* ignore HEAD failure; proceed with GET */
                 }
 
-                const response = await fetchWithProxyRetry(getProxyUrl(streamUrl), {
+                const response = await fetch(streamUrl, {
                     cache: 'no-store',
                     signal: options.signal,
                 });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
 
                 const contentLengthHeader = response.headers.get('Content-Length');
                 const totalBytes = resolveDownloadTotalBytes(contentLengthHeader, headContentLength);

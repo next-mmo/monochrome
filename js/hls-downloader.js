@@ -1,5 +1,4 @@
 import { SegmentedDownloadProgress } from './progressEvents';
-import { getProxyUrl, fetchWithProxyRetry } from './proxy-utils';
 
 export class HlsDownloader {
     constructor() {}
@@ -7,12 +6,14 @@ export class HlsDownloader {
     async downloadHlsStream(masterUrl, options = {}) {
         const { onProgress, signal } = options;
 
-        const response = await fetchWithProxyRetry(getProxyUrl(masterUrl), { signal });
+        const response = await fetch(masterUrl, { signal });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const masterText = await response.text();
 
         const variantUrl = this.getBestVariantUrl(masterUrl, masterText);
 
-        const mediaResponse = await fetchWithProxyRetry(getProxyUrl(variantUrl), { signal });
+        const mediaResponse = await fetch(variantUrl, { signal });
+        if (!mediaResponse.ok) throw new Error(`HTTP error! status: ${mediaResponse.status}`);
         const mediaText = await mediaResponse.text();
 
         const segments = this.parseMediaPlaylist(variantUrl, mediaText);
@@ -30,7 +31,8 @@ export class HlsDownloader {
             onProgress?.(new SegmentedDownloadProgress(downloadedBytes, undefined, i, totalSegments));
 
             const segmentUrl = segments[i];
-            const segmentResponse = await fetchWithProxyRetry(getProxyUrl(segmentUrl), { signal });
+            const segmentResponse = await fetch(segmentUrl, { signal });
+            if (!segmentResponse.ok) throw new Error(`HTTP error! status: ${segmentResponse.status}`);
 
             const chunk = await segmentResponse.arrayBuffer();
             chunks.push(chunk);

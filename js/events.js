@@ -1383,6 +1383,11 @@ export async function handleTrackAction(
         if (alreadyOffline) {
             await removeOfflineTrack(item.id);
             showNotification(`Removed from offline: ${item.title}`);
+            // Update save-offline button states
+            const dlBtn = document.getElementById('download-current-btn');
+            const fsDlBtn = document.getElementById('fs-download-btn');
+            if (dlBtn) { dlBtn.classList.remove('active'); dlBtn.title = 'Save Offline'; }
+            if (fsDlBtn) { fsDlBtn.classList.remove('active'); fsDlBtn.title = 'Save Offline'; }
         } else {
             // Create a progress notification for offline saving
             const container =
@@ -1419,26 +1424,38 @@ export async function handleTrackAction(
             const statusEl = taskEl.querySelector('.offline-status');
 
             try {
-                const quality = downloadQualitySettings.getQuality();
-                const blob = await api.downloadTrack(item.id, quality, `${item.title}.flac`, {
-                    track: item,
-                    triggerDownload: false,
-                    onProgress: (progress) => {
-                        if (progress.receivedBytes && progress.totalBytes) {
-                            const percent = Math.round((progress.receivedBytes / progress.totalBytes) * 100);
-                            const receivedMB = (progress.receivedBytes / (1024 * 1024)).toFixed(1);
-                            const totalMB = (progress.totalBytes / (1024 * 1024)).toFixed(1);
-                            progressFill.style.width = `${Math.min(percent, 90)}%`;
-                            statusEl.textContent = `Downloading: ${receivedMB} MB / ${totalMB} MB (${percent}%)`;
-                        } else if (progress.currentSegment && progress.totalSegments) {
-                            const percent = Math.round((progress.currentSegment / progress.totalSegments) * 100);
-                            progressFill.style.width = `${Math.min(percent, 90)}%`;
-                            statusEl.textContent = `Downloading: segment ${progress.currentSegment}/${progress.totalSegments} (${percent}%)`;
-                        } else if (progress.message) {
-                            statusEl.textContent = progress.message;
-                        }
-                    },
-                });
+                let blob;
+                const streamUrl = item.url || item.streamUrl || item.audioUrl || (item.isLocal ? item.path : null);
+                
+                if (streamUrl && !item.id?.toString().match(/^\d+$/)) {
+                    // For radio/local tracks with direct URLs, bypass Tidal API
+                    statusEl.textContent = 'Downloading direct stream...';
+                    const res = await fetch(streamUrl);
+                    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+                    blob = await res.blob();
+                    progressFill.style.width = '90%';
+                } else {
+                    const quality = downloadQualitySettings.getQuality();
+                    blob = await api.downloadTrack(item.id, quality, `${item.title}.flac`, {
+                        track: item,
+                        triggerDownload: false,
+                        onProgress: (progress) => {
+                            if (progress.receivedBytes && progress.totalBytes) {
+                                const percent = Math.round((progress.receivedBytes / progress.totalBytes) * 100);
+                                const receivedMB = (progress.receivedBytes / (1024 * 1024)).toFixed(1);
+                                const totalMB = (progress.totalBytes / (1024 * 1024)).toFixed(1);
+                                progressFill.style.width = `${Math.min(percent, 90)}%`;
+                                statusEl.textContent = `Downloading: ${receivedMB} MB / ${totalMB} MB (${percent}%)`;
+                            } else if (progress.currentSegment && progress.totalSegments) {
+                                const percent = Math.round((progress.currentSegment / progress.totalSegments) * 100);
+                                progressFill.style.width = `${Math.min(percent, 90)}%`;
+                                statusEl.textContent = `Downloading: segment ${progress.currentSegment}/${progress.totalSegments} (${percent}%)`;
+                            } else if (progress.message) {
+                                statusEl.textContent = progress.message;
+                            }
+                        },
+                    });
+                }
 
                 // Fetch cover art
                 progressFill.style.width = '92%';
@@ -1464,6 +1481,11 @@ export async function handleTrackAction(
                 progressFill.style.background = '#10b981';
                 statusEl.textContent = '⚡ Saved offline!';
                 statusEl.style.color = '#10b981';
+                // Update save-offline button states
+                const dlBtn = document.getElementById('download-current-btn');
+                const fsDlBtn = document.getElementById('fs-download-btn');
+                if (dlBtn) { dlBtn.classList.add('active'); dlBtn.title = 'Remove from Offline'; }
+                if (fsDlBtn) { fsDlBtn.classList.add('active'); fsDlBtn.title = 'Remove from Offline'; }
 
                 setTimeout(() => {
                     taskEl.style.animation = 'slide-out 0.3s ease forwards';
@@ -1473,7 +1495,7 @@ export async function handleTrackAction(
                 console.error('Failed to save offline:', err);
                 progressFill.style.width = '100%';
                 progressFill.style.background = '#ef4444';
-                statusEl.textContent = '✗ Failed to save offline';
+                statusEl.textContent = `✗ Failed: ${err.message || 'Unknown error'}`;
                 statusEl.style.color = '#ef4444';
 
                 setTimeout(() => {

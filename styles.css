@@ -5459,6 +5459,23 @@ input:checked + .slider::before {
     cursor: not-allowed;
 }
 
+/* Save Offline button active state - track is saved */
+.save-offline-btn.active {
+    color: #10b981 !important;
+}
+
+.save-offline-btn.active svg {
+    filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.4));
+}
+
+.save-offline-btn {
+    transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.save-offline-btn:hover {
+    transform: scale(1.1);
+}
+
 .template-guide {
     width: 100%;
     border-collapse: collapse;

@@ -977,7 +977,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('download-current-btn')?.addEventListener('click', async () => {
         if (Player.instance.currentTrack) {
             await handleTrackAction(
-                'download',
+                'save-offline',
                 Player.instance.currentTrack,
                 Player.instance,
                 MusicAPI.instance,

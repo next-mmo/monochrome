@@ -525,18 +525,18 @@ export async function getCoverBlob(api, coverId) {
         if (response.ok) {
             blob = await response.blob();
         } else {
-            // If direct fetch fails (e.g. 404 from SW due to CORS), try proxy
-            const proxyResponse = await fetchWithProxyRetry(getProxyUrl(url));
+            // If direct fetch fails (e.g. 404 from SW due to CORS), try fetch
+            const proxyResponse = await fetch(url);
             blob = await proxyResponse.blob();
         }
     } catch {
-        // Network error (CORS rejection not handled by SW), try proxy
+        // Network error (CORS rejection not handled by SW), try fetch
         try {
-            const url = api.getCoverUrl(coverId, fetchSize.toString());
-            const proxyResponse = await fetchWithProxyRetry(getProxyUrl(url));
+            const url2 = api.getCoverUrl(coverId, fetchSize.toString());
+            const proxyResponse = await fetch(url2);
             blob = await proxyResponse.blob();
         } catch (e) {
-            console.warn('Proxy fetch failed:', e);
+            console.warn('Fetch failed:', e);
         }
     }
 
