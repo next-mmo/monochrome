@@ -2343,6 +2343,19 @@ export class UIRenderer {
             this.player.clearArtistPopularTracksContext();
         }
 
+        // Stop movie playback when navigating away from movie page
+        if (previousPage === 'movie' && pageId !== 'movie') {
+            const iframeContainer = document.getElementById('movie-iframe');
+            if (iframeContainer) {
+                iframeContainer.src = '';
+            }
+        }
+
+        // Pause audio player when navigating to movie page
+        if (pageId === 'movie' && this.player && typeof this.player.pause === 'function') {
+            this.player.pause();
+        }
+
         // Clear background and color if not on album, artist, playlist, or mix page
         if (!['album', 'artist', 'playlist', 'mix'].includes(pageId)) {
             this.setPageBackground(null);

@@ -11,15 +11,6 @@ export const RADIO_CATEGORIES = [
         ],
     },
     {
-        id: 'movie',
-        label: 'Movie',
-        subs: [
-            { id: 'all', label: 'All' },
-            { id: 'khmer', label: 'Khmer' },
-            { id: 'english', label: 'English' },
-        ],
-    },
-    {
         id: 'music',
         label: 'Music',
         subs: [
@@ -85,6 +76,49 @@ async function loadTracks() {
     return [...defaultTracks];
 }
 
+async function loadPodcastTracks() {
+    try {
+        const url = 'https://api-ap-northeast-1.graphcms.com/v2/cl37clyyk82h601xq9zcjf9h4/master?query=query%20content_view_b006b6b5e6b04f10b710592b33f658a8(%20%24where%3A%20ListWhereInput%2C%20%24orderBy%3A%20ListOrderByInput)%20%7B%0A%20%20page%3A%20listsConnection(%0A%20%20%20%20first%3A%201000%0A%20%20%20%20stage%3A%20DRAFT%0A%20%20%20%20where%3A%20%24where%0A%20%20%20%20orderBy%3A%20%24orderBy%0A%20%20)%20%7B%0A%20%20%20%20edges%20%7B%0A%20%20%20%20%20%20node%20%7B%0A%20%20%20%20%20%20%20%20id%0A%20%20%20%20%20%20%20%20stage%0A%20%20%20%20%20%20%20%20data%0A%20%20%20%20%20%20%20%20id%0A%20%20%20%20%0A%20%20%20%20%20%20%7D%0A%20%20%20%20%7D%0A%20%20%20%20aggregate%20%7B%0A%20%20%20%20%20%20count%0A%20%20%20%20%7D%0A%20%20%7D%0A%7D%0A&operationName=content_view_b006b6b5e6b04f10b710592b33f658a8';
+        const res = await fetch(url, {
+            headers: {
+                'accept': '*/*',
+                'origin': 'https://kamsan-daily.netlify.app',
+                'referer': 'https://kamsan-daily.netlify.app/'
+            }
+        });
+        const json = await res.json();
+        
+        let items = [];
+        if (json?.data?.page?.edges?.[0]?.node?.data) {
+            items = json.data.page.edges[0].node.data;
+        }
+
+        const tracks = [];
+        items.forEach(item => {
+            if (item.audioUrl) {
+                tracks.push({
+                    id: 'radio-imported-' + item.id,
+                    title: item.title,
+                    artist: { name: item.author || 'Unknown' },
+                    artists: [{ name: item.author || 'Unknown' }],
+                    album: { name: 'Podcasts' },
+                    audioUrl: item.audioUrl,
+                    category: 'podcast',
+                    subcategory: 'khmer',
+                    type: 'track',
+                    provider: 'custom',
+                    isLocal: false,
+                    duration: 0
+                });
+            }
+        });
+        return tracks;
+    } catch (e) {
+        console.error('Failed to load podcasts from API:', e);
+        return [];
+    }
+}
+
 async function loadTracksByFilter(category, subcategory) {
     if (category === 'offline') {
         try {
@@ -110,6 +144,11 @@ async function loadTracksByFilter(category, subcategory) {
     }
 
     let tracks = await loadTracks();
+    
+    // Merge dynamic podcast tracks
+    const podcastTracks = await loadPodcastTracks();
+    tracks = [...tracks, ...podcastTracks];
+
     if (category && category !== 'all') {
         tracks = tracks.filter((t) => t.category === category);
     }

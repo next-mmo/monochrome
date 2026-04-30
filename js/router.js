@@ -111,7 +111,7 @@ export function createRouter(ui) {
                 await ui.renderAdminPage();
                 break;
             case 'home':
-                navigate('/radio');
+                navigate('/radio?category=offline&subcategory=all');
                 break;
             case 'reset-password':
                 await ui.renderResetPasswordPage();
