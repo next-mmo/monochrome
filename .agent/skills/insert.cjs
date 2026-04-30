@@ -14,9 +14,9 @@ try {
 
     let addedCount = 0;
 
-    items.forEach(item => {
+    items.forEach((item) => {
         // Only insert if there's a valid audio URL and it's not already in the list
-        if (item.audioUrl && !tracks.some(t => t.audioUrl === item.audioUrl)) {
+        if (item.audioUrl && !tracks.some((t) => t.audioUrl === item.audioUrl)) {
             tracks.push({
                 id: 'radio-imported-' + item.id,
                 title: item.title,
@@ -29,7 +29,7 @@ try {
                 type: 'track',
                 provider: 'custom',
                 isLocal: false,
-                duration: 0
+                duration: 0,
             });
             addedCount++;
         }
@@ -37,7 +37,6 @@ try {
 
     fs.writeFileSync(tracksPath, JSON.stringify(tracks, null, 4));
     console.log(`Successfully inserted ${addedCount} new tracks from data.json!`);
-
 } catch (e) {
     console.error('Error inserting data:', e);
 }
