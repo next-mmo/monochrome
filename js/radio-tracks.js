@@ -2,6 +2,16 @@ const STORAGE_KEY = 'monochrome-radio-tracks';
 
 export const RADIO_CATEGORIES = [
     {
+        id: 'offline',
+        label: 'Offline',
+        subs: [
+            { id: 'all', label: 'All' },
+            { id: 'khmer', label: 'Khmer' },
+            { id: 'english', label: 'English' },
+            { id: 'kpop', label: 'K-Pop' },
+        ],
+    },
+    {
         id: 'podcast',
         label: 'Podcast',
         subs: [
@@ -13,16 +23,6 @@ export const RADIO_CATEGORIES = [
     {
         id: 'music',
         label: 'Music',
-        subs: [
-            { id: 'all', label: 'All' },
-            { id: 'khmer', label: 'Khmer' },
-            { id: 'english', label: 'English' },
-            { id: 'kpop', label: 'K-Pop' },
-        ],
-    },
-    {
-        id: 'offline',
-        label: 'Offline',
         subs: [
             { id: 'all', label: 'All' },
             { id: 'khmer', label: 'Khmer' },
@@ -76,7 +76,32 @@ async function loadTracks() {
     return [...defaultTracks];
 }
 
+const PODCAST_AUTH_KEY = 'monochrome-podcast-authed';
+
+function isPodcastAuthed() {
+    return localStorage.getItem(PODCAST_AUTH_KEY) === 'true';
+}
+
+function promptPodcastAuth() {
+    if (isPodcastAuthed()) return true;
+
+    const user = prompt('Enter admin username to load podcasts:');
+    if (user === null) return false;
+    const pass = prompt('Enter admin password:');
+    if (pass === null) return false;
+
+    if (user === 'admin' && pass === 'admin123') {
+        localStorage.setItem(PODCAST_AUTH_KEY, 'true');
+        return true;
+    }
+
+    alert('Invalid credentials.');
+    return false;
+}
+
 async function loadPodcastTracks() {
+    if (!isPodcastAuthed()) return [];
+
     try {
         const url = 'https://api-ap-northeast-1.graphcms.com/v2/cl37clyyk82h601xq9zcjf9h4/master?query=query%20content_view_b006b6b5e6b04f10b710592b33f658a8(%20%24where%3A%20ListWhereInput%2C%20%24orderBy%3A%20ListOrderByInput)%20%7B%0A%20%20page%3A%20listsConnection(%0A%20%20%20%20first%3A%201000%0A%20%20%20%20stage%3A%20DRAFT%0A%20%20%20%20where%3A%20%24where%0A%20%20%20%20orderBy%3A%20%24orderBy%0A%20%20)%20%7B%0A%20%20%20%20edges%20%7B%0A%20%20%20%20%20%20node%20%7B%0A%20%20%20%20%20%20%20%20id%0A%20%20%20%20%20%20%20%20stage%0A%20%20%20%20%20%20%20%20data%0A%20%20%20%20%20%20%20%20id%0A%20%20%20%20%0A%20%20%20%20%20%20%7D%0A%20%20%20%20%7D%0A%20%20%20%20aggregate%20%7B%0A%20%20%20%20%20%20count%0A%20%20%20%20%7D%0A%20%20%7D%0A%7D%0A&operationName=content_view_b006b6b5e6b04f10b710592b33f658a8';
         const res = await fetch(url, {
@@ -145,9 +170,11 @@ async function loadTracksByFilter(category, subcategory) {
 
     let tracks = await loadTracks();
     
-    // Merge dynamic podcast tracks
-    const podcastTracks = await loadPodcastTracks();
-    tracks = [...tracks, ...podcastTracks];
+    // Only load podcast tracks when user selects the podcast category
+    if (category === 'podcast') {
+        const podcastTracks = await loadPodcastTracks();
+        tracks = [...tracks, ...podcastTracks];
+    }
 
     if (category && category !== 'all') {
         tracks = tracks.filter((t) => t.category === category);
@@ -218,4 +245,5 @@ export const radioTrackManager = {
     removeTrack,
     clearTracks,
     resetToDefaults,
+    promptPodcastAuth,
 };

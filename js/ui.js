@@ -2776,7 +2776,12 @@ export class UIRenderer {
             categoryTabsEl.innerHTML = htmls.join('');
             categoryTabsEl.querySelectorAll('.search-tab').forEach((tab) => {
                 tab.addEventListener('click', () => {
-                    selectedCategory = tab.dataset.category;
+                    const clickedCategory = tab.dataset.category;
+                    // Prompt for auth when clicking the podcast tab
+                    if (clickedCategory === 'podcast' && !radioTrackManager.promptPodcastAuth()) {
+                        return; // Auth failed or cancelled, stay on current tab
+                    }
+                    selectedCategory = clickedCategory;
                     selectedSubcategory = 'all';
                     this.player.radioCategory = selectedCategory;
                     this.player.radioSubcategory = selectedSubcategory;
