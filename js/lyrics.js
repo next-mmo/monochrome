@@ -969,9 +969,12 @@ export function openLyricsPanel(track, audioPlayer, lyricsManager, forceOpen = f
 }
 
 function getLyricsHighlightColor() {
-    // Check if the current theme is light
+    // Karaoke blue — bright on dark, deeper blue on light for legibility.
+    // The am-lyrics component drives all syllable colors (active wipe, finished,
+    // unsung secondary) from this single value, so setting it to blue gives
+    // a real-time word-by-word karaoke effect for free.
     const isLight = getComputedStyle(document.documentElement).colorScheme === 'light';
-    return isLight ? '#000' : '#fff';
+    return isLight ? '#0277bd' : '#4fc3f7';
 }
 
 function updateLyricsTheme() {
@@ -1051,6 +1054,25 @@ function applyLyricsShadowTweaks(amLyrics, container) {
 
             .lyrics-line.active .lyrics-line-container {
                 transform: scale(1.015);
+            }
+
+            /* Karaoke: unsung syllables stay white, the active wipe (driven
+               by --lyplus-text-primary = highlight color = blue) paints them
+               blue word-by-word as each is sung. */
+            :host {
+                --lyplus-text-secondary: rgba(255, 255, 255, 0.92) !important;
+            }
+
+            /* Already-sung syllables get a soft glow so progression is clear */
+            .lyrics-line.active .lyrics-syllable.finished,
+            .lyrics-line.active .lyrics-syllable.finished span.char {
+                text-shadow: 0 0 8px color-mix(in srgb, var(--lyplus-text-primary), transparent 55%);
+            }
+
+            /* Currently-singing syllable: extra glow on the wipe edge */
+            .lyrics-line.active .lyrics-syllable.highlight,
+            .lyrics-line.active .lyrics-syllable.highlight span.char {
+                text-shadow: 0 0 12px color-mix(in srgb, var(--lyplus-text-primary), transparent 35%);
             }
         `;
 
@@ -1197,22 +1219,371 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
     }
 }
 
+// Word-by-word karaoke for tracks where the lyrics provider only delivers
+// line-level timing (LRCLIB, etc.). The am-lyrics component still wraps each
+// word in a `.lyrics-syllable` span, but for line-synced lyrics every syllable
+// shares the same start time, so the component cannot animate them
+// individually. We re-distribute that line's duration across its existing
+// syllable spans (by character weight) and toggle our own kw-* classes,
+// producing a real word-by-word white→blue wipe.
+//
+// When a syllable already has individual timing (Apple Music / musixmatch-word
+// — different data-start-time per syllable) we leave the line alone and let
+// the component's native wipe gradient run.
+function setupKaraokeFallback(amLyrics, lyricsManager) {
+    const root = amLyrics.shadowRoot;
+    if (!root) return null;
+
+    let activeLineEl = null;
+    let activeWords = []; // each: { el, start, end } as fraction of line
+    let parsedLines = null;
+    let createdSpans = []; // spans we added (for cleanup) when no syllables existed
+
+    if (!root.getElementById('karaoke-fallback-styles')) {
+        const style = document.createElement('style');
+        style.id = 'karaoke-fallback-styles';
+        // Specificity matters: the component's "fade-in-line" rule is
+        //   .lyrics-line.active .lyrics-syllable.line-synced  (0,3,0) !important
+        // and slams every syllable to the highlight color the moment a line
+        // activates. We add .lyrics-container ancestor to reach (0,4,0) so we
+        // outrank it. We also kill its `animation: fade-in-line` so the line
+        // doesn't "snap to all-blue" the moment it activates.
+        style.textContent = `
+            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-pending,
+            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-pending span.char {
+                animation: none !important;
+                color: rgba(255, 255, 255, 0.92) !important;
+                background-color: transparent !important;
+                background-image: none !important;
+                -webkit-text-fill-color: rgba(255, 255, 255, 0.92) !important;
+                text-shadow: none !important;
+                opacity: 1 !important;
+                transition: color 0.12s ease, -webkit-text-fill-color 0.12s ease, text-shadow 0.18s ease !important;
+            }
+            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-sung,
+            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-sung span.char {
+                animation: none !important;
+                color: var(--lyplus-text-primary) !important;
+                background-color: transparent !important;
+                background-image: none !important;
+                -webkit-text-fill-color: var(--lyplus-text-primary) !important;
+                text-shadow: 0 0 8px color-mix(in srgb, var(--lyplus-text-primary), transparent 55%) !important;
+                opacity: 1 !important;
+            }
+            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-singing,
+            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-singing span.char {
+                animation: none !important;
+                color: var(--lyplus-text-primary) !important;
+                background-color: transparent !important;
+                background-image: none !important;
+                -webkit-text-fill-color: var(--lyplus-text-primary) !important;
+                text-shadow: 0 0 14px color-mix(in srgb, var(--lyplus-text-primary), transparent 25%) !important;
+                opacity: 1 !important;
+            }
+
+            /* Un-style the am-lyrics wrapper so our child fallbacks render correctly */
+            .lyrics-container .lyrics-line.active .lyrics-syllable:has(.kw-fallback) {
+                animation: none !important;
+                background: none !important;
+                -webkit-background-clip: unset !important;
+                background-clip: unset !important;
+                color: inherit !important;
+                -webkit-text-fill-color: inherit !important;
+            }
+
+            /* Plain-text fallback (no .lyrics-syllable elements at all) */
+            .lyrics-container .lyrics-line.active .kw-fallback,
+            .lyrics-container .lyrics-line.active .kw-fallback.kw-pending {
+                color: rgba(255, 255, 255, 0.92) !important;
+                -webkit-text-fill-color: rgba(255, 255, 255, 0.92) !important;
+                transition: color 0.12s ease, text-shadow 0.18s ease !important;
+                text-shadow: none !important;
+            }
+            .lyrics-container .lyrics-line.active .kw-fallback.kw-sung {
+                color: var(--lyplus-text-primary) !important;
+                -webkit-text-fill-color: var(--lyplus-text-primary) !important;
+                text-shadow: 0 0 8px color-mix(in srgb, var(--lyplus-text-primary), transparent 55%) !important;
+            }
+            .lyrics-container .lyrics-line.active .kw-fallback.kw-singing {
+                color: var(--lyplus-text-primary) !important;
+                -webkit-text-fill-color: var(--lyplus-text-primary) !important;
+                text-shadow: 0 0 14px color-mix(in srgb, var(--lyplus-text-primary), transparent 25%) !important;
+            }
+
+            /* Keep inactive lines alone — let the component dim them naturally */
+            .lyrics-line:not(.active) .kw-fallback,
+            .lyrics-line:not(.active) .lyrics-syllable.kw-pending,
+            .lyrics-line:not(.active) .lyrics-syllable.kw-sung,
+            .lyrics-line:not(.active) .lyrics-syllable.kw-singing {
+                color: inherit !important;
+                background-color: inherit !important;
+                -webkit-text-fill-color: inherit !important;
+                text-shadow: none !important;
+            }
+        `;
+        root.appendChild(style);
+    }
+
+
+
+    // Returns true if syllables in the line already carry individual word
+    // timing (different start times). If so, the component will animate them
+    // natively and we should stay out of the way.
+    const hasIndividualTiming = (syllables) => {
+        if (syllables.length < 2) return false;
+        const firstStart = syllables[0].dataset?.startTime;
+        for (let i = 1; i < syllables.length; i++) {
+            if (syllables[i].dataset?.startTime !== firstStart) return true;
+        }
+        return false;
+    };
+
+    // Returns:
+    //  { words } – we adopted the line's syllables (line-synced timing, we drive)
+    //  { skip: true } – syllables exist with individual timing; component handles it
+    //  null – no syllables; caller may wrap plain text instead
+    const adoptSyllables = (lineEl) => {
+        const syllables = Array.from(
+            lineEl.querySelectorAll('.lyrics-syllable:not(.transliteration)')
+        ).filter((s) => (s.textContent || '').trim().length > 0);
+        if (!syllables.length) return null;
+        if (hasIndividualTiming(syllables)) return { skip: true };
+
+        // If am-lyrics outputs LRCLIB without individual timing, it wraps the whole line in 1 or 2 syllables.
+        // In that case, we should fallback to wrapPlainText so we can split it into real words!
+        return null;
+    };
+
+    const wrapPlainText = (lineEl) => {
+        const container = lineEl.querySelector('.lyrics-line-container') || lineEl;
+        const words = [];
+        const lengths = [];
+        let total = 0;
+
+        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, false);
+        const textNodes = [];
+        let node;
+        while ((node = walker.nextNode())) {
+            // Ignore text inside transliteration or already processed fallback spans
+            if (node.parentElement && !node.parentElement.closest('.transliteration') && !node.parentElement.closest('.kw-fallback')) {
+                if (node.textContent.trim()) textNodes.push(node);
+            }
+        }
+        if (!textNodes.length) return null;
+
+        const segmenter = window.Intl && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'word' }) : null;
+
+        for (const tn of textNodes) {
+            const frag = document.createDocumentFragment();
+            const text = tn.textContent;
+            
+            let parts = [];
+            if (segmenter) {
+                const segments = Array.from(segmenter.segment(text));
+                for (const seg of segments) {
+                    parts.push({ text: seg.segment, isWord: seg.isWordLike });
+                }
+            } else {
+                const splits = text.split(/(\s+)/);
+                for (const split of splits) {
+                    if (split) parts.push({ text: split, isWord: !/^\s+$/.test(split) });
+                }
+            }
+
+            for (const part of parts) {
+                if (!part.isWord && /^\s+$/.test(part.text)) {
+                    frag.appendChild(document.createTextNode(part.text));
+                } else {
+                    const span = document.createElement('span');
+                    span.className = 'kw-fallback kw-pending';
+                    span.textContent = part.text;
+                    const len = part.text.trim().length || 1;
+                    lengths.push(len);
+                    total += len;
+                    frag.appendChild(span);
+                    words.push(span);
+                    createdSpans.push(span);
+                }
+            }
+            tn.parentNode.replaceChild(frag, tn);
+        }
+
+        let acc = 0;
+        return words.map((el, i) => {
+            const start = total > 0 ? acc / total : 0;
+            acc += lengths[i];
+            const end = total > 0 ? acc / total : 1;
+            return { el, start, end };
+        });
+    };
+
+    const cleanupLine = (lineEl) => {
+        if (!lineEl) return;
+        // Remove our classes from any syllables we touched
+        lineEl.querySelectorAll('.lyrics-syllable').forEach((s) => {
+            s.classList.remove('kw-pending', 'kw-sung', 'kw-singing');
+        });
+        // Unwrap any plain spans we injected
+        if (createdSpans.length) {
+            createdSpans.forEach((span) => {
+                if (span.isConnected) {
+                    span.replaceWith(document.createTextNode(span.textContent));
+                }
+            });
+            createdSpans = [];
+            try { lineEl.normalize(); } catch (e) { /* ignore */ }
+        }
+    };
+
+    const debug = (() => {
+        try { return localStorage.getItem('debug:karaoke') === '1'; } catch { return false; }
+    })();
+    const dlog = (...a) => debug && console.log('[karaoke]', ...a);
+
+    let activeSyllableSnapshot = 0; // tracks when we should re-evaluate
+    let scheduled = false;
+    const evaluate = () => {
+        scheduled = false;
+        const next = root.querySelector('.lyrics-line.active:not(.lyrics-gap)');
+        const sylCount = next ? next.querySelectorAll('.lyrics-syllable').length : 0;
+
+        if (next === activeLineEl && sylCount === activeSyllableSnapshot) return;
+        if (next !== activeLineEl) {
+            if (activeLineEl) cleanupLine(activeLineEl);
+            activeLineEl = next;
+            activeWords = [];
+        }
+        activeSyllableSnapshot = sylCount;
+        if (!activeLineEl) return;
+
+        const adopted = adoptSyllables(activeLineEl);
+        dlog('active line changed', { sylCount, adopted: adopted ? Object.keys(adopted)[0] : null });
+        if (adopted?.skip) return;
+        if (adopted?.words) {
+            activeWords = adopted.words;
+            dlog('adopted', activeWords.length, 'syllables (line-synced)');
+            return;
+        }
+        const wrapped = wrapPlainText(activeLineEl);
+        if (wrapped) {
+            activeWords = wrapped;
+            dlog('wrapped', activeWords.length, 'words (no syllables in DOM)');
+        } else {
+            dlog('no words could be extracted from active line', activeLineEl?.outerHTML?.slice(0, 200));
+        }
+    };
+
+    const observer = new MutationObserver(() => {
+        if (scheduled) return;
+        scheduled = true;
+        // RAF defers until the component has finished its current render pass,
+        // so we don't miss syllables that arrive a tick after the .active class.
+        requestAnimationFrame(evaluate);
+    });
+
+    observer.observe(root, { subtree: true, attributes: true, attributeFilter: ['class'] });
+    // Initial evaluation in case the active line is already rendered.
+    requestAnimationFrame(evaluate);
+
+    const update = (currentTimeSec) => {
+        if (!activeWords.length) return;
+
+        const first = activeWords[0]?.el;
+        const last = activeWords[activeWords.length - 1]?.el;
+        const firstParent = first?.closest('.lyrics-syllable') || activeLineEl?.querySelector('.lyrics-syllable');
+        const lastParent = last?.closest('.lyrics-syllable') || activeLineEl?.querySelectorAll('.lyrics-syllable')[activeLineEl.querySelectorAll('.lyrics-syllable').length - 1];
+
+        const startMs = parseFloat(first?.dataset?.startTime ?? firstParent?.dataset?.startTime ?? '');
+        const endMs = parseFloat(last?.dataset?.endTime ?? lastParent?.dataset?.endTime ?? first?.dataset?.endTime ?? firstParent?.dataset?.endTime ?? '');
+
+        let lineStart = NaN;
+        let lineEnd = NaN;
+
+        if (Number.isFinite(startMs)) {
+            lineStart = startMs / 1000;
+            const fallbackEndMs = Number.isFinite(endMs) && endMs > startMs ? endMs : startMs + 5000;
+            const maxDuration = (fallbackEndMs - startMs) / 1000;
+
+            // Estimate actual singing duration based on character count so we don't
+            // drag the wipe across long instrumental gaps between lines.
+            // ~12-15 chars per second is typical for sung lyrics.
+            let charCount = 0;
+            if (activeWords && activeWords.length) {
+                charCount = activeWords.reduce((acc, w) => acc + (w.el.textContent || '').trim().length, 0);
+            }
+            const estimatedDuration = Math.max(1.0, charCount * 0.12);
+            
+            lineEnd = lineStart + Math.min(estimatedDuration, maxDuration);
+        }
+
+        if (!Number.isFinite(lineStart) || !Number.isFinite(lineEnd)) return;
+
+        const duration = Math.max(0.5, lineEnd - lineStart);
+        const progress = (currentTimeSec - lineStart) / duration;
+
+        const sungClass = 'kw-sung';
+        const singingClass = 'kw-singing';
+        const baseClass = 'kw-pending';
+
+        for (let i = 0; i < activeWords.length; i++) {
+            const { el, start, end } = activeWords[i];
+            if (progress >= end) {
+                if (!el.classList.contains(sungClass)) {
+                    el.classList.remove(singingClass);
+                    if (baseClass) el.classList.remove(baseClass);
+                    el.classList.add(sungClass);
+                }
+            } else if (progress >= start) {
+                if (!el.classList.contains(singingClass)) {
+                    el.classList.remove(sungClass);
+                    if (baseClass) el.classList.remove(baseClass);
+                    el.classList.add(singingClass);
+                }
+            } else {
+                if (el.classList.contains(sungClass) || el.classList.contains(singingClass)) {
+                    el.classList.remove(sungClass, singingClass);
+                    if (baseClass) el.classList.add(baseClass);
+                }
+            }
+        }
+    };
+
+    return {
+        update,
+        destroy() {
+            observer.disconnect();
+            if (activeLineEl) cleanupLine(activeLineEl);
+        },
+    };
+}
+
 function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
     let baseTimeMs = 0;
     let lastTimestamp = performance.now();
     let animationFrameId = null;
+    let karaokeFallback = null;
 
-    // Get timing offset from lyrics manager (in milliseconds)
-    const getTimingOffset = () => {
-        return lyricsManager?.timingOffset || 0;
+    const getTimingOffset = () => lyricsManager?.timingOffset || 0;
+
+    const getKaraokeFallback = () => {
+        if (!karaokeFallback && amLyrics.shadowRoot) {
+            karaokeFallback = setupKaraokeFallback(amLyrics, lyricsManager);
+            try {
+                if (localStorage.getItem('debug:karaoke') === '1') {
+                    console.log('[karaoke] fallback initialised', { trackId: lyricsManager?.currentTrackId });
+                }
+            } catch { /* ignore */ }
+        }
+        return karaokeFallback;
     };
 
     const updateTime = () => {
         const currentMs = audioPlayer.currentTime * 1000;
         baseTimeMs = currentMs;
         lastTimestamp = performance.now();
-        // Apply timing offset: positive offset delays lyrics, negative advances them
-        amLyrics.currentTime = currentMs - getTimingOffset();
+        const adjusted = currentMs - getTimingOffset();
+        amLyrics.currentTime = adjusted;
+        getKaraokeFallback()?.update(adjusted / 1000);
     };
 
     const tick = () => {
@@ -1220,8 +1591,9 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
             const now = performance.now();
             const elapsed = now - lastTimestamp;
             const nextMs = baseTimeMs + elapsed;
-            // Apply timing offset: positive offset delays lyrics, negative advances them
-            amLyrics.currentTime = nextMs - getTimingOffset();
+            const adjusted = nextMs - getTimingOffset();
+            amLyrics.currentTime = adjusted;
+            getKaraokeFallback()?.update(adjusted / 1000);
             animationFrameId = requestAnimationFrame(tick);
         }
     };
@@ -1278,9 +1650,8 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
     }
 
     return () => {
-        if (animationFrameId) {
-            cancelAnimationFrame(animationFrameId);
-        }
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        karaokeFallback?.destroy();
         audioPlayer.removeEventListener('timeupdate', updateTime);
         audioPlayer.removeEventListener('play', onPlay);
         audioPlayer.removeEventListener('pause', onPause);

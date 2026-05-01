@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Karaoke Debug</title>
+<style>
+  body { background:#222; color:#fff; font-family:system-ui; padding:1rem; }
+  am-lyrics { display:block; width: 800px; height: 480px; background:#000; }
+  pre { background:#111; padding:8px; max-height:240px; overflow:auto; }
+  button { padding:4px 10px; }
+</style>
+</head>
+<body>
+<h2>am-lyrics structural probe</h2>
+<p>Loads the component, then dumps its shadow DOM after each interesting state.</p>
+<button id="dumpBtn">Dump shadow DOM</button>
+<pre id="out">…</pre>
+<am-lyrics
+  song-title="អូនចង់រាំលេង"
+  song-artist="Test"
+  highlight-color="#4fc3f7"
+  autoscroll
+></am-lyrics>
+
+<script type="module">
+import '@uimaxbai/am-lyrics/am-lyrics.js';
+
+const am = document.querySelector('am-lyrics');
+const out = document.getElementById('out');
+
+const dump = () => {
+  const root = am.shadowRoot;
+  if (!root) return { error: 'no shadowRoot' };
+  const lines = Array.from(root.querySelectorAll('.lyrics-line'));
+  const active = root.querySelector('.lyrics-line.active');
+  const sample = active || lines[0];
+  let info = { lineCount: lines.length, hasActive: !!active };
+  if (sample) {
+    const syl = Array.from(sample.querySelectorAll('.lyrics-syllable'));
+    info.sampleClasses = sample.className;
+    info.syllables = {
+      count: syl.length,
+      classes: syl.slice(0, 5).map(s => s.className),
+      starts: syl.slice(0, 5).map(s => s.dataset.startTime),
+      ends: syl.slice(0, 5).map(s => s.dataset.endTime),
+    };
+    info.outerHtml = sample.outerHTML.slice(0, 1200);
+  }
+  const container = root.querySelector('.lyrics-container');
+  if (container) info.containerClasses = container.className;
+  return info;
+};
+
+const render = () => { out.textContent = JSON.stringify(dump(), null, 2); };
+
+document.getElementById('dumpBtn').addEventListener('click', render);
+
+// Auto-dump every 2s for 12s while the component fetches lyrics
+let i = 0;
+const t = setInterval(() => {
+  render();
+  if (++i > 6) clearInterval(t);
+}, 2000);
+render();
+</script>
+</body>
+</html>

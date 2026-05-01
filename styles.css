@@ -11808,7 +11808,7 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
 }
 
 #fullscreen-cover-overlay .fullscreen-lyrics-content am-lyrics {
-    --am-lyrics-highlight-color: #f6f4ef;
+    --am-lyrics-highlight-color: #4fc3f7;
     --lyrics-scroll-padding-top: 18%;
     --lyplus-blur-amount: 0.16em;
     --lyplus-blur-amount-near: 0.085em;
@@ -11824,8 +11824,8 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
 
     --lyplus-font-size-base: clamp(34px, 3vw, 52px);
     --lyplus-padding-line: 8px;
-    --lyplus-text-color: rgb(246, 244, 239, 0.08);
-    --lyplus-active-color: #f6f4ef;
+    --lyplus-text-color: rgba(79, 195, 247, 0.18);
+    --lyplus-active-color: #4fc3f7;
 
     line-height: 1.32;
     letter-spacing: -0.04em;
@@ -12073,7 +12073,7 @@ body:has(#side-panel.active) #close-fullscreen-cover-btn {
         --lyrics-scroll-padding-top: 18%;
         --lyplus-font-size-base: clamp(1.75rem, 7vw, 2.35rem);
         --lyplus-padding-line: 6px;
-        --lyplus-text-color: rgb(246, 244, 239, 0.16);
+        --lyplus-text-color: rgba(79, 195, 247, 0.22);
         --lyplus-blur-amount: 0.16em;
         --lyplus-blur-amount-near: 0.08em;
 
