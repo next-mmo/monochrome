@@ -925,10 +925,7 @@ export class Player {
         this.updateMediaSession(track);
 
         // Update fullscreen metadata if visible
-        if (
-            UIRenderer.instance &&
-            document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex'
-        ) {
+        if (UIRenderer.instance && document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex') {
             UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
         }
     }
