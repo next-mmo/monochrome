@@ -1249,36 +1249,26 @@ function setupKaraokeFallback(amLyrics, lyricsManager) {
         // outrank it. We also kill its `animation: fade-in-line` so the line
         // doesn't "snap to all-blue" the moment it activates.
         style.textContent = `
-            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-pending,
-            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-pending span.char {
+            .lyrics-container .lyrics-line.active .kw-fallback {
                 animation: none !important;
-                color: rgba(255, 255, 255, 0.92) !important;
-                background-color: transparent !important;
-                background-image: none !important;
-                -webkit-text-fill-color: rgba(255, 255, 255, 0.92) !important;
+                color: transparent !important;
+                -webkit-text-fill-color: transparent !important;
+                background-color: rgba(255, 255, 255, 0.92) !important;
+                background-image: linear-gradient(90deg, var(--lyplus-text-primary), var(--lyplus-text-primary)) !important;
+                background-repeat: no-repeat !important;
+                background-position: left center !important;
+                background-size: var(--kw-wipe-progress, 0%) 100% !important;
+                background-clip: text !important;
+                -webkit-background-clip: text !important;
+            }
+            .lyrics-container .lyrics-line.active .kw-fallback.kw-pending {
                 text-shadow: none !important;
-                opacity: 1 !important;
-                transition: color 0.12s ease, -webkit-text-fill-color 0.12s ease, text-shadow 0.18s ease !important;
             }
-            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-sung,
-            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-sung span.char {
-                animation: none !important;
-                color: var(--lyplus-text-primary) !important;
-                background-color: transparent !important;
-                background-image: none !important;
-                -webkit-text-fill-color: var(--lyplus-text-primary) !important;
-                text-shadow: 0 0 8px color-mix(in srgb, var(--lyplus-text-primary), transparent 55%) !important;
-                opacity: 1 !important;
-            }
-            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-singing,
-            .lyrics-container .lyrics-line.active .lyrics-syllable.kw-singing span.char {
-                animation: none !important;
-                color: var(--lyplus-text-primary) !important;
-                background-color: transparent !important;
-                background-image: none !important;
-                -webkit-text-fill-color: var(--lyplus-text-primary) !important;
+            .lyrics-container .lyrics-line.active .kw-fallback.kw-singing {
                 text-shadow: 0 0 14px color-mix(in srgb, var(--lyplus-text-primary), transparent 25%) !important;
-                opacity: 1 !important;
+            }
+            .lyrics-container .lyrics-line.active .kw-fallback.kw-sung {
+                text-shadow: 0 0 8px color-mix(in srgb, var(--lyplus-text-primary), transparent 55%) !important;
             }
 
             /* Un-style the am-lyrics wrapper so our child fallbacks render correctly */
@@ -1291,25 +1281,6 @@ function setupKaraokeFallback(amLyrics, lyricsManager) {
                 -webkit-text-fill-color: inherit !important;
             }
 
-            /* Plain-text fallback (no .lyrics-syllable elements at all) */
-            .lyrics-container .lyrics-line.active .kw-fallback,
-            .lyrics-container .lyrics-line.active .kw-fallback.kw-pending {
-                color: rgba(255, 255, 255, 0.92) !important;
-                -webkit-text-fill-color: rgba(255, 255, 255, 0.92) !important;
-                transition: color 0.12s ease, text-shadow 0.18s ease !important;
-                text-shadow: none !important;
-            }
-            .lyrics-container .lyrics-line.active .kw-fallback.kw-sung {
-                color: var(--lyplus-text-primary) !important;
-                -webkit-text-fill-color: var(--lyplus-text-primary) !important;
-                text-shadow: 0 0 8px color-mix(in srgb, var(--lyplus-text-primary), transparent 55%) !important;
-            }
-            .lyrics-container .lyrics-line.active .kw-fallback.kw-singing {
-                color: var(--lyplus-text-primary) !important;
-                -webkit-text-fill-color: var(--lyplus-text-primary) !important;
-                text-shadow: 0 0 14px color-mix(in srgb, var(--lyplus-text-primary), transparent 25%) !important;
-            }
-
             /* Keep inactive lines alone — let the component dim them naturally */
             .lyrics-line:not(.active) .kw-fallback,
             .lyrics-line:not(.active) .lyrics-syllable.kw-pending,
@@ -1319,6 +1290,7 @@ function setupKaraokeFallback(amLyrics, lyricsManager) {
                 background-color: inherit !important;
                 -webkit-text-fill-color: inherit !important;
                 text-shadow: none !important;
+                background-image: none !important;
             }
         `;
         root.appendChild(style);
@@ -1527,23 +1499,30 @@ function setupKaraokeFallback(amLyrics, lyricsManager) {
 
         for (let i = 0; i < activeWords.length; i++) {
             const { el, start, end } = activeWords[i];
+            
             if (progress >= end) {
                 if (!el.classList.contains(sungClass)) {
                     el.classList.remove(singingClass);
                     if (baseClass) el.classList.remove(baseClass);
                     el.classList.add(sungClass);
                 }
+                el.style.setProperty('--kw-wipe-progress', '100%');
             } else if (progress >= start) {
                 if (!el.classList.contains(singingClass)) {
                     el.classList.remove(sungClass);
                     if (baseClass) el.classList.remove(baseClass);
                     el.classList.add(singingClass);
                 }
+                const wordDur = end - start;
+                const localProgress = wordDur > 0 ? (progress - start) / wordDur : 1;
+                const clamped = Math.max(0, Math.min(1, localProgress));
+                el.style.setProperty('--kw-wipe-progress', `${(clamped * 100).toFixed(2)}%`);
             } else {
                 if (el.classList.contains(sungClass) || el.classList.contains(singingClass)) {
                     el.classList.remove(sungClass, singingClass);
                     if (baseClass) el.classList.add(baseClass);
                 }
+                el.style.setProperty('--kw-wipe-progress', '0%');
             }
         }
     };
