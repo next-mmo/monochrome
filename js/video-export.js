@@ -247,7 +247,9 @@ export async function exportVideo({ track, lyricsData, duration, coverUrl, onPro
     const SPF = 1 / FPS;
 
     onStatus?.('Loading cover art…');
-    const coverImg   = await loadImage(coverUrl);
+    // Proxy through our Vercel API to bypass CORS
+    const proxyCoverUrl = coverUrl ? `/api/proxy-audio?url=${encodeURIComponent(coverUrl)}` : '';
+    const coverImg   = await loadImage(proxyCoverUrl);
     const blurredCvs = makeBlurred(coverImg, W, H);
 
     // Parse synced lyrics lines
