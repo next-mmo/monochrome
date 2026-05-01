@@ -51,6 +51,7 @@ export class Player {
         this.shuffleActive = false;
         this.repeatMode = REPEAT_MODE.OFF;
         this.preloadCache = new Map();
+        this._radioCoverCache = new Map();
         this._pendingPreload = false;
         setInterval(this.checkPreloadConditions.bind(this), 2000);
         this.preloadAbortController = null;
@@ -846,6 +847,92 @@ export class Player {
         if (fullscreenCover) await syncCover(fullscreenCover);
     }
 
+    /**
+     * Fetch cover art from Tidal search as a fallback for radio tracks that have no cover.
+     * Searches by track title + artist name, caches results, and updates the UI when found.
+     */
+    _fetchRadioCoverFallback(track, trackTitle, artistName) {
+        const cacheKey = `${trackTitle}::${artistName}`.toLowerCase();
+
+        // Check cache first
+        if (this._radioCoverCache.has(cacheKey)) {
+            const cachedCoverId = this._radioCoverCache.get(cacheKey);
+            if (cachedCoverId) {
+                this._applyRadioCover(track, cachedCoverId);
+            }
+            return;
+        }
+
+        // Search Tidal in the background
+        const searchQuery = `${trackTitle} ${artistName}`.trim();
+        this.api
+            .searchTracks(searchQuery, { limit: 1 })
+            .then((result) => {
+                if (this.currentTrack?.id !== track.id) return; // Track changed, abort
+
+                const found = result?.items?.[0];
+                const foundCoverId = found?.album?.cover || found?.image || found?.cover;
+
+                // Cache even if null to prevent re-fetching
+                this._radioCoverCache.set(cacheKey, foundCoverId || null);
+
+                if (foundCoverId) {
+                    // Store on the track object so media session and fullscreen can use it
+                    if (!track.album) track.album = {};
+                    track.album.cover = foundCoverId;
+                    track.cover = foundCoverId;
+
+                    this._applyRadioCover(track, foundCoverId);
+                }
+            })
+            .catch((err) => {
+                console.warn('Radio cover fallback search failed:', err);
+                this._radioCoverCache.set(cacheKey, null);
+            });
+    }
+
+    /**
+     * Apply a discovered cover ID to the now-playing bar, fullscreen view, and media session.
+     */
+    _applyRadioCover(track, coverId) {
+        const coverUrl = this.api.getCoverUrl(coverId);
+        const coverSrcset = this.api.getCoverSrcset(coverId);
+
+        // Update now-playing bar cover
+        const playerBarCover = document.querySelector('.now-playing-bar .cover');
+        if (playerBarCover && playerBarCover.tagName === 'IMG') {
+            playerBarCover.src = coverUrl;
+            if (coverSrcset) {
+                playerBarCover.setAttribute('srcset', coverSrcset);
+                playerBarCover.setAttribute('sizes', '(max-width: 640px) 160px, (max-width: 1024px) 320px, 640px');
+            }
+        }
+
+        // Update fullscreen cover if open
+        const fullscreenCover = document.getElementById('fullscreen-cover-image');
+        if (fullscreenCover && fullscreenCover.tagName === 'IMG') {
+            fullscreenCover.src = this.api.getCoverUrl(coverId, '1280');
+        }
+
+        // Update radio page cover
+        const radioCover = document.getElementById('radio-cover');
+        if (radioCover) {
+            radioCover.src = this.api.getCoverUrl(coverId, '640');
+            radioCover.style.display = 'block';
+        }
+
+        // Re-update media session with the found cover
+        this.updateMediaSession(track);
+
+        // Update fullscreen metadata if visible
+        if (
+            UIRenderer.instance &&
+            document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex'
+        ) {
+            UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
+        }
+    }
+
     async playTrackFromQueue(startTime = 0, recursiveCount = 0, isRetry = false) {
         if (!isRetry) {
             this.isFallbackRetry = false;
@@ -1016,6 +1103,11 @@ export class Player {
                         }
                     }
                 }
+
+                // Fallback: fetch cover art from Tidal search when radio tracks have no cover
+                if (!coverId && !videoCoverUrl && trackTitle) {
+                    this._fetchRadioCoverFallback(track, trackTitle, artistName);
+                }
             }
             if (this.audio) {
                 const isInFullscreen = document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex';
@@ -1050,6 +1142,26 @@ export class Player {
             mixBtn.style.display = track.mixes && track.mixes.TRACK_MIX ? 'flex' : 'none';
         }
         document.title = `${trackTitle} • ${getTrackArtists(track)}`;
+
+        // Update the radio page glass container with current track info
+        const radioPageTitle = document.getElementById('radio-title');
+        const radioPageArtist = document.getElementById('radio-artist');
+        const radioPageCover = document.getElementById('radio-cover');
+        if (radioPageTitle) radioPageTitle.textContent = trackTitle;
+        if (radioPageArtist) radioPageArtist.textContent = artistName;
+        if (radioPageCover) {
+            const coverId = track.image || track.cover || track.album?.cover;
+            if (coverId) {
+                radioPageCover.src = this.api.getCoverUrl(coverId, '640');
+                radioPageCover.style.display = 'block';
+            } else {
+                radioPageCover.style.display = 'none';
+            }
+        }
+        const radioCategoryLabel = document.getElementById('radio-category-label');
+        if (radioCategoryLabel) {
+            radioCategoryLabel.textContent = track.category || this.radioCategory || '';
+        }
 
         this.updatePlayingTrackIndicator();
         this.updateMediaSession(track);

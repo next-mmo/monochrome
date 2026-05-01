@@ -2775,16 +2775,34 @@ export class UIRenderer {
                 subcategoryTabsEl.innerHTML = '';
                 return;
             }
-            subcategoryTabsEl.innerHTML =
-                '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading...</span>';
-            const htmls = [];
-            for (const sub of cat.subs) {
-                const tracks = await radioTrackManager.loadTracksByFilter(selectedCategory, sub.id);
-                htmls.push(
-                    `<button class="search-tab${selectedSubcategory === sub.id ? ' active' : ''}" data-sub="${sub.id}">${sub.label} (${tracks.length})</button>`
+            // Render tabs immediately with placeholder counts, then update
+            subcategoryTabsEl.innerHTML = cat.subs
+                .map(
+                    (sub) =>
+                        `<button class="search-tab${selectedSubcategory === sub.id ? ' active' : ''}" data-sub="${sub.id}">${sub.label}</button>`
+                )
+                .join('');
+
+            // Load counts in parallel
+            try {
+                const countResults = await Promise.all(
+                    cat.subs.map((sub) =>
+                        radioTrackManager
+                            .loadTracksByFilter(selectedCategory, sub.id)
+                            .then((t) => t.length)
+                            .catch(() => 0)
+                    )
                 );
+                subcategoryTabsEl.innerHTML = cat.subs
+                    .map(
+                        (sub, i) =>
+                            `<button class="search-tab${selectedSubcategory === sub.id ? ' active' : ''}" data-sub="${sub.id}">${sub.label} (${countResults[i]})</button>`
+                    )
+                    .join('');
+            } catch (e) {
+                console.warn('Failed to load subcategory counts:', e);
             }
-            subcategoryTabsEl.innerHTML = htmls.join('');
+
             subcategoryTabsEl.querySelectorAll('.search-tab').forEach((tab) => {
                 tab.addEventListener('click', () => {
                     selectedSubcategory = tab.dataset.sub;
@@ -2796,16 +2814,30 @@ export class UIRenderer {
         };
 
         const renderCatTabs = async () => {
-            categoryTabsEl.innerHTML =
-                '<span style="color: var(--muted-foreground); font-size: 0.8rem;">Loading categories...</span>';
-            const htmls = [];
-            for (const cat of RADIO_CATEGORIES) {
-                const tracks = await radioTrackManager.loadTracksByFilter(cat.id, null);
-                htmls.push(
-                    `<button class="search-tab${selectedCategory === cat.id ? ' active' : ''}" data-category="${cat.id}">${cat.label} (${tracks.length})</button>`
+            // Render tabs immediately without counts so page is never blank
+            categoryTabsEl.innerHTML = RADIO_CATEGORIES.map(
+                (cat) =>
+                    `<button class="search-tab${selectedCategory === cat.id ? ' active' : ''}" data-category="${cat.id}">${cat.label}</button>`
+            ).join('');
+
+            // Load counts in parallel, update labels when ready
+            try {
+                const countResults = await Promise.all(
+                    RADIO_CATEGORIES.map((cat) =>
+                        radioTrackManager
+                            .loadTracksByFilter(cat.id, null)
+                            .then((t) => t.length)
+                            .catch(() => 0)
+                    )
                 );
+                categoryTabsEl.innerHTML = RADIO_CATEGORIES.map(
+                    (cat, i) =>
+                        `<button class="search-tab${selectedCategory === cat.id ? ' active' : ''}" data-category="${cat.id}">${cat.label} (${countResults[i]})</button>`
+                ).join('');
+            } catch (e) {
+                console.warn('Failed to load category counts:', e);
             }
-            categoryTabsEl.innerHTML = htmls.join('');
+
             categoryTabsEl.querySelectorAll('.search-tab').forEach((tab) => {
                 tab.addEventListener('click', () => {
                     const clickedCategory = tab.dataset.category;
@@ -2829,8 +2861,16 @@ export class UIRenderer {
         coverEl.style.display = 'none';
         if (categoryLabel) categoryLabel.textContent = '';
 
-        await renderCatTabs();
-        await renderSubTabs();
+        try {
+            await renderCatTabs();
+            await renderSubTabs();
+        } catch (e) {
+            console.error('Failed to render radio tabs:', e);
+            categoryTabsEl.innerHTML = RADIO_CATEGORIES.map(
+                (cat) =>
+                    `<button class="search-tab${selectedCategory === cat.id ? ' active' : ''}" data-category="${cat.id}">${cat.label}</button>`
+            ).join('');
+        }
 
         if (playBtn) {
             playBtn.onclick = async () => {
