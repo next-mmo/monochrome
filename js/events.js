@@ -23,7 +23,7 @@ import { syncManager } from './accounts/pocketbase.js';
 import { waveformGenerator } from './waveform.js';
 import { audioContextManager } from './audio-context.js';
 import { hapticLongPress, hapticMedium, hapticLight } from './haptics.js';
-import { SVG_BIN, SVG_MUTE, SVG_PAUSE, SVG_PLAY, SVG_VOLUME, SVG_CHECKBOX, SVG_CHECKBOX_CHECKED } from './icons.js';
+import { SVG_BIN, SVG_MUTE, SVG_PAUSE, SVG_PLAY, SVG_PLAY_LARGE, SVG_PAUSE_LARGE, SVG_VOLUME, SVG_CHECKBOX, SVG_CHECKBOX_CHECKED } from './icons.js';
 import { partyManager } from './listening-party.js';
 import { MusicAPI } from './music-api.js';
 import { LyricsManager } from './lyrics.js';
@@ -435,6 +435,10 @@ export async function initializePlayerEvents(player, audioPlayer, scrobbler, ui)
             }
 
             playPauseBtn.innerHTML = SVG_PAUSE(20);
+            const radioPlayPauseBtn = document.getElementById('radio-play-pause-btn');
+            if (radioPlayPauseBtn) {
+                radioPlayPauseBtn.innerHTML = SVG_PAUSE_LARGE(32);
+            }
             player.updateMediaSessionPlaybackState();
             player.updateMediaSessionPositionState();
             updateTabTitle(player);
@@ -449,6 +453,10 @@ export async function initializePlayerEvents(player, audioPlayer, scrobbler, ui)
         element.addEventListener('pause', () => {
             if (player.activeElement !== element) return;
             playPauseBtn.innerHTML = SVG_PLAY(20);
+            const radioPlayPauseBtn = document.getElementById('radio-play-pause-btn');
+            if (radioPlayPauseBtn) {
+                radioPlayPauseBtn.innerHTML = SVG_PLAY_LARGE(32);
+            }
             player.updateMediaSessionPlaybackState();
             player.updateMediaSessionPositionState();
         });
@@ -476,6 +484,11 @@ export async function initializePlayerEvents(player, audioPlayer, scrobbler, ui)
                 const currentTimeEl = document.getElementById('current-time');
                 progressFill.style.width = `${(currentTime / duration) * 100}%`;
                 currentTimeEl.textContent = formatTime(currentTime);
+
+                const radioProgressFill = document.getElementById('radio-progress-fill');
+                const radioCurrentTimeEl = document.getElementById('radio-current-time');
+                if (radioProgressFill) radioProgressFill.style.width = `${(currentTime / duration) * 100}%`;
+                if (radioCurrentTimeEl) radioCurrentTimeEl.textContent = formatTime(currentTime);
 
                 listeningTracker.onTimeUpdate(currentTime, duration);
 
@@ -512,6 +525,8 @@ export async function initializePlayerEvents(player, audioPlayer, scrobbler, ui)
             if (player.activeElement !== element) return;
             const totalDurationEl = document.getElementById('total-duration');
             totalDurationEl.textContent = formatTime(element.duration);
+            const radioTotalDurationEl = document.getElementById('radio-total-duration');
+            if (radioTotalDurationEl) radioTotalDurationEl.textContent = formatTime(element.duration);
             player.updateMediaSessionPositionState();
         });
 
@@ -755,6 +770,29 @@ export async function initializePlayerEvents(player, audioPlayer, scrobbler, ui)
     audioPlayer.muted = isMuted;
     if (player.video) player.video.muted = isMuted;
     updateVolumeUI();
+
+    const collapsePlayerBtn = document.getElementById('collapse-player-btn');
+    const expandPlayerFab = document.getElementById('expand-player-fab');
+
+    if (collapsePlayerBtn && expandPlayerFab) {
+        const isCollapsed = localStorage.getItem('player_collapsed') === 'true';
+        if (isCollapsed) {
+            document.body.classList.add('player-collapsed');
+            expandPlayerFab.style.display = 'inline-flex';
+        }
+
+        collapsePlayerBtn.addEventListener('click', () => {
+            document.body.classList.add('player-collapsed');
+            expandPlayerFab.style.display = 'inline-flex';
+            localStorage.setItem('player_collapsed', 'true');
+        });
+
+        expandPlayerFab.addEventListener('click', () => {
+            document.body.classList.remove('player-collapsed');
+            expandPlayerFab.style.display = 'none';
+            localStorage.setItem('player_collapsed', 'false');
+        });
+    }
 
     initializeSmoothSliders(player);
 }
@@ -1562,6 +1600,11 @@ export async function handleTrackAction(
         const fsLikeBtn = document.getElementById('fs-like-btn');
         if (fsLikeBtn && (type === 'track' || type === 'video') && player?.currentTrack?.id === item.id) {
             elementsToUpdate.push(fsLikeBtn);
+        }
+
+        const radioLikeBtn = document.getElementById('radio-like-btn');
+        if (radioLikeBtn && (type === 'track' || type === 'video') && player?.currentTrack?.id === item.id) {
+            elementsToUpdate.push(radioLikeBtn);
         }
 
         elementsToUpdate.forEach((btn) => {

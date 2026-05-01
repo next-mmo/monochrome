@@ -991,8 +991,8 @@ themeObserver.observe(document.documentElement, {
     attributeFilter: ['data-theme', 'style'],
 });
 
-function applyFullscreenLyricsShadowTweaks(amLyrics, container) {
-    if (!amLyrics || container?.id !== 'fullscreen-lyrics-content') return;
+function applyLyricsShadowTweaks(amLyrics, container) {
+    if (!amLyrics) return;
 
     const injectStyle = () => {
         const root = amLyrics.shadowRoot;
@@ -1028,6 +1028,11 @@ function applyFullscreenLyricsShadowTweaks(amLyrics, container) {
 
             .lyrics-line:not(.active):not(.pre-active) {
                 opacity: 0.44;
+            }
+
+            .lyrics-line.active + .lyrics-line:not(.active):not(.pre-active) {
+                opacity: 0.85;
+                filter: blur(0px) !important;
             }
             .lyrics-line-container {
                 transition:
@@ -1109,7 +1114,7 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
         amLyrics.style.width = '100%';
 
         container.appendChild(amLyrics);
-        applyFullscreenLyricsShadowTweaks(amLyrics, container);
+        applyLyricsShadowTweaks(amLyrics, container);
 
         lyricsManager.setupLyricsObserver(amLyrics);
 

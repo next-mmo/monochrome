@@ -227,10 +227,15 @@
                 <!-- Content injected dynamically -->
             </div>
         </div>
-        <button id="ai-assistant-fab" class="ai-assistant-fab" title="Open AI music assistant">
-            <use svg="!lucide/sparkles.svg" size="20" />
-            <span>AI</span>
-        </button>
+        <div class="fab-container">
+            <button id="ai-assistant-fab" class="ai-assistant-fab" title="Open AI music assistant">
+                <use svg="!lucide/sparkles.svg" size="20" />
+                <span>AI</span>
+            </button>
+            <button id="expand-player-fab" class="ai-assistant-fab" title="Expand Player" style="display: none;">
+                <use svg="!lucide/music.svg" size="20" />
+            </button>
+        </div>
 
         <div id="fullscreen-cover-overlay" style="display: none">
             <div id="visualizer-container">
@@ -1748,6 +1753,12 @@
                                     <span>Settings</span>
                                 </a>
                             </li>
+                            <li class="nav-item" id="sidebar-nav-admin">
+                                <a href="/admin">
+                                    <use svg="!lucide/shield.svg" size="24" />
+                                    <span>Admin</span>
+                                </a>
+                            </li>
                         </ul>
                     </nav>
                     <div class="sidebar-bottom-container">
@@ -2413,6 +2424,62 @@
                                     <p id="radio-artist" class="radio-track-artist"></p>
                                     <div class="radio-badge-container">
                                         <p id="radio-category-label" class="radio-category-badge"></p>
+                                    </div>
+                                    <div class="radio-actions" style="margin-top: 1rem; width: 100%;">
+                                        <button id="radio-like-btn" class="btn-icon like-btn" title="Like">
+                                            <use svg="!lucide/heart.svg" class="heart-icon" size="24" />
+                                        </button>
+                                        <button id="radio-add-playlist-btn" class="btn-icon" title="Add to Playlist">
+                                            <use svg="!lucide/square-pen.svg" size="24" />
+                                        </button>
+                                        <button id="radio-download-btn" class="btn-icon save-offline-btn" title="Save Offline">
+                                            <use svg="!lucide/hard-drive-download.svg" size="24" />
+                                        </button>
+                                        <button id="radio-cast-btn" class="btn-icon" title="Cast">
+                                            <use svg="!lucide/cast.svg" size="24" />
+                                        </button>
+                                        <button id="radio-queue-btn" class="btn-icon" title="Queue">
+                                            <use svg="!lucide/list.svg" size="24" />
+                                        </button>
+                                    </div>
+                                    <div id="radio-next-track" style="display: none" class="fullscreen-next-track">
+                                        <span class="label">Up Next</span>
+                                        <span class="value"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="radio-controls" style="display: none; margin-bottom: 2rem;">
+                                <div class="fullscreen-progress-container">
+                                    <span id="radio-current-time">0:00</span>
+                                    <div id="radio-progress-bar" class="progress-bar">
+                                        <div id="radio-progress-fill" class="progress-fill"></div>
+                                    </div>
+                                    <span id="radio-total-duration">0:00</span>
+                                </div>
+                                <div class="fullscreen-buttons" style="justify-content: center; gap: 1.5rem; margin-top: 1rem;">
+                                    <button id="radio-shuffle-btn" title="Shuffle">
+                                        <use svg="!lucide/shuffle.svg" size="24" />
+                                    </button>
+                                    <button id="radio-prev-btn" title="Previous">
+                                        <use svg="!lucide/arrow-left-to-line.svg" size="24" />
+                                    </button>
+                                    <button id="radio-play-pause-btn" class="play-pause-btn" title="Play">
+                                        <use svg="./images/play-large.svg" size="32" />
+                                    </button>
+                                    <button id="radio-next-btn" title="Next">
+                                        <use svg="!lucide/arrow-right-to-line.svg" size="24" />
+                                    </button>
+                                    <button id="radio-repeat-btn" title="Repeat">
+                                        <use svg="!lucide/repeat.svg" size="24" />
+                                    </button>
+                                </div>
+                                <div class="fullscreen-volume-container" style="justify-content: center; margin-top: 1rem;">
+                                    <button id="radio-volume-btn" class="fs-volume-btn" title="Mute">
+                                        <use svg="!lucide/volume-1.svg" size="24" />
+                                    </button>
+                                    <div id="radio-volume-bar" class="fs-volume-bar">
+                                        <div id="radio-volume-fill" class="fs-volume-fill"></div>
                                     </div>
                                 </div>
                             </div>
@@ -6716,6 +6783,9 @@
                         </button>
                     </div>
                     <div class="volume-slider-row desktop-only">
+                        <button id="collapse-player-btn" title="Collapse Player">
+                            <use svg="!lucide/minimize-2.svg" size="20" />
+                        </button>
                         <button id="volume-btn" title="Mute"></button>
                         <div id="volume-bar" class="volume-bar">
                             <div id="volume-fill" class="volume-fill"></div>

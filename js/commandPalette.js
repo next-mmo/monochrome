@@ -178,6 +178,17 @@ class CommandPalette {
                 },
             },
             {
+                id: 'nav-admin',
+                group: 'Navigation',
+                icon: 'shield',
+                label: 'Go to Admin',
+                keywords: ['admin', 'dashboard', 'backend', 'manage'],
+                shortcut: null,
+                action: () => {
+                    navigate('/admin');
+                },
+            },
+            {
                 id: 'nav-about',
                 group: 'Navigation',
                 icon: 'info',

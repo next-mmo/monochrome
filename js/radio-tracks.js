@@ -188,13 +188,26 @@ async function loadTracksByFilter(category, subcategory) {
 
 async function saveTracks(tracks) {
     try {
-        await fetch('/api/radio-tracks', {
+        const response = await fetch('/api/radio-tracks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(tracks),
         });
+        
+        if (!response.ok) {
+            throw new Error(`API returned ${response.status}`);
+        }
     } catch (e) {
-        console.error('Failed to save radio tracks via API', e);
+        console.warn('Failed to save radio tracks via API, falling back to JSON download', e);
+        // Fallback for deploy servers (like Vercel) where we can't write to the file system
+        const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(tracks, null, 2));
+        const downloadAnchorNode = document.createElement('a');
+        downloadAnchorNode.setAttribute('href', dataStr);
+        downloadAnchorNode.setAttribute('download', 'radio-tracks.json');
+        document.body.appendChild(downloadAnchorNode);
+        downloadAnchorNode.click();
+        downloadAnchorNode.remove();
+        alert('Changes cannot be saved directly on the deploy server. The updated radio-tracks.json has been downloaded. Please commit it to your repository to apply changes.');
     }
 }
 

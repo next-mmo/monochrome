@@ -433,6 +433,8 @@ export class Player {
                 }
                 const totalDurationEl = document.getElementById('total-duration');
                 if (totalDurationEl) totalDurationEl.textContent = formatTime(track.duration);
+                const radioTotalDurationEl = document.getElementById('radio-total-duration');
+                if (radioTotalDurationEl) radioTotalDurationEl.textContent = formatTime(track.duration);
                 document.title = `${trackTitle} • ${getTrackArtists(track)}`;
 
                 this.updatePlayingTrackIndicator();

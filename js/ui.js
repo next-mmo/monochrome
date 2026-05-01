@@ -1370,8 +1370,15 @@ export class UIRenderer {
         if (nextTrack) {
             nextTrackEl.style.display = 'flex';
             nextTrackEl.querySelector('.value').textContent = `${nextTrack.title} • ${getTrackArtists(nextTrack)}`;
+            const radioNextTrackEl = document.getElementById('radio-next-track');
+            if (radioNextTrackEl) {
+                radioNextTrackEl.style.display = 'flex';
+                radioNextTrackEl.querySelector('.value').textContent = `${nextTrack.title} • ${getTrackArtists(nextTrack)}`;
+            }
         } else {
             nextTrackEl.style.display = 'none';
+            const radioNextTrackEl = document.getElementById('radio-next-track');
+            if (radioNextTrackEl) radioNextTrackEl.style.display = 'none';
         }
     }
 
@@ -2890,6 +2897,54 @@ export class UIRenderer {
                     '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 0.5rem;"><circle cx="12" cy="12" r="2"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/><path d="M7.76 16.24a6 6 0 0 1 0-8.48"/><path d="M16.24 7.76a6 6 0 0 1 0 8.48"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg> Playing Radio...';
             };
         }
+
+        // Bind radio fullscreen-like action buttons
+        const radioLikeBtn = document.getElementById('radio-like-btn');
+        if (radioLikeBtn) {
+            radioLikeBtn.onclick = () => document.getElementById('now-playing-like-btn')?.click();
+        }
+        const radioAddPlaylistBtn = document.getElementById('radio-add-playlist-btn');
+        if (radioAddPlaylistBtn) {
+            radioAddPlaylistBtn.onclick = () => document.getElementById('now-playing-add-playlist-btn')?.click();
+        }
+        const radioDownloadBtn = document.getElementById('radio-download-btn');
+        if (radioDownloadBtn) {
+            radioDownloadBtn.onclick = () => document.getElementById('download-current-btn')?.click();
+        }
+        const radioCastBtn = document.getElementById('radio-cast-btn');
+        if (radioCastBtn) {
+            radioCastBtn.onclick = () => document.getElementById('cast-btn')?.click();
+        }
+        const radioQueueBtn = document.getElementById('radio-queue-btn');
+        if (radioQueueBtn) {
+            radioQueueBtn.onclick = () => document.getElementById('queue-btn')?.click();
+        }
+
+        // Playback controls proxy
+        const radioPlayPauseBtn = document.getElementById('radio-play-pause-btn');
+        if (radioPlayPauseBtn) {
+            radioPlayPauseBtn.onclick = () => document.getElementById('play-pause-btn')?.click();
+        }
+        const radioPrevBtn = document.getElementById('radio-prev-btn');
+        if (radioPrevBtn) {
+            radioPrevBtn.onclick = () => document.getElementById('prev-btn')?.click();
+        }
+        const radioNextBtn = document.getElementById('radio-next-btn');
+        if (radioNextBtn) {
+            radioNextBtn.onclick = () => document.getElementById('next-btn')?.click();
+        }
+        const radioShuffleBtn = document.getElementById('radio-shuffle-btn');
+        if (radioShuffleBtn) {
+            radioShuffleBtn.onclick = () => document.getElementById('shuffle-btn')?.click();
+        }
+        const radioRepeatBtn = document.getElementById('radio-repeat-btn');
+        if (radioRepeatBtn) {
+            radioRepeatBtn.onclick = () => document.getElementById('repeat-btn')?.click();
+        }
+        const radioVolumeBtn = document.getElementById('radio-volume-btn');
+        if (radioVolumeBtn) {
+            radioVolumeBtn.onclick = () => document.getElementById('volume-btn')?.click();
+        }
     }
 
     async renderMoviePage() {
@@ -2934,9 +2989,16 @@ export class UIRenderer {
     }
 
     async renderAdminPage() {
+        const { radioTrackManager, RADIO_CATEGORIES } = await import('./radio-tracks.js');
+
+        if (!radioTrackManager.promptPodcastAuth()) {
+            this.showPage('home');
+            window.history.pushState({}, '', '/');
+            return;
+        }
+
         this.showPage('admin');
 
-        const { radioTrackManager, RADIO_CATEGORIES } = await import('./radio-tracks.js');
 
         const trackListEl = document.getElementById('admin-track-list');
         const trackCountEl = document.getElementById('admin-track-count');
@@ -3008,6 +3070,9 @@ export class UIRenderer {
                         <div style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${track.title}</div>
                     </div>
                     <div style="font-size: 0.7rem; color: var(--muted-foreground); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${track.audioUrl}">${track.audioUrl}</div>
+                    <button class="btn-icon admin-play-movie" data-track-id="${track.id}" title="Play" style="flex-shrink: 0; color: var(--primary);">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    </button>
                     <button class="btn-icon admin-remove-movie" data-track-id="${track.id}" title="Remove" style="flex-shrink: 0; color: var(--destructive, #ef4444);">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                     </button>
@@ -3015,6 +3080,18 @@ export class UIRenderer {
             `
                 )
                 .join('');
+
+            movieListEl.querySelectorAll('.admin-play-movie').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const trackId = btn.dataset.trackId;
+                    const index = movies.findIndex((t) => String(t.id) === String(trackId));
+                    if (index !== -1) {
+                        this.player.is247Radio = false;
+                        this.player.setQueue([...movies], index);
+                        this.player.playAtIndex(index);
+                    }
+                });
+            });
 
             movieListEl.querySelectorAll('.admin-remove-movie').forEach((btn) => {
                 btn.addEventListener('click', async () => {
@@ -3154,6 +3231,9 @@ export class UIRenderer {
                         <div style="font-size: 0.8rem; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${track.artist?.name || 'Unknown'}</div>
                     </div>
                     <div style="font-size: 0.7rem; color: var(--muted-foreground); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${track.audioUrl}">${track.audioUrl}</div>
+                    <button class="btn-icon admin-play-track" data-track-id="${track.id}" title="Play" style="flex-shrink: 0; color: var(--primary);">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    </button>
                     <button class="btn-icon admin-remove-track" data-track-id="${track.id}" title="Remove" style="flex-shrink: 0; color: var(--destructive, #ef4444);">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                     </button>
@@ -3161,6 +3241,18 @@ export class UIRenderer {
             `
                 )
                 .join('');
+
+            trackListEl.querySelectorAll('.admin-play-track').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const trackId = btn.dataset.trackId;
+                    const index = tracks.findIndex((t) => String(t.id) === String(trackId));
+                    if (index !== -1) {
+                        this.player.is247Radio = false;
+                        this.player.setQueue([...tracks], index);
+                        this.player.playAtIndex(index);
+                    }
+                });
+            });
 
             trackListEl.querySelectorAll('.admin-remove-track').forEach((btn) => {
                 btn.addEventListener('click', async () => {
