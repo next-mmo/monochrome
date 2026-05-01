@@ -17,7 +17,8 @@ import {
     getShareUrl,
     createModal,
 } from './utils.js';
-import { openLyricsPanel, renderLyricsInFullscreen, clearFullscreenLyricsSync } from './lyrics.js';
+import { openLyricsPanel, renderLyricsInFullscreen, clearFullscreenLyricsSync, LyricsManager } from './lyrics.js';
+import { openVideoExportModal } from './video-export.js';
 import {
     recentActivityManager,
     backgroundSettings,
@@ -2049,7 +2050,25 @@ export class UIRenderer {
         const fsDownloadBtn = document.getElementById('fs-download-btn');
         const fsCastBtn = document.getElementById('fs-cast-btn');
         const fsQueueBtn = document.getElementById('fs-queue-btn');
+        const fsExportBtn = document.getElementById('fs-export-video-btn');
         const artistEl = document.getElementById('fullscreen-track-artist');
+
+        if (fsExportBtn) {
+            fsExportBtn.onclick = () => {
+                const track = this.player?.currentTrack;
+                if (!track) return;
+                const coverUrl = this.api?.getCoverUrl?.(track.album?.cover, '1280') ||
+                    document.getElementById('fullscreen-cover-image')?.src || '';
+                let lyricsManager = null;
+                try { lyricsManager = LyricsManager.instance; } catch { /* not init */ }
+                openVideoExportModal({
+                    track,
+                    lyricsManager,
+                    audioPlayer: this.player?.activeElement,
+                    coverUrl,
+                });
+            };
+        }
 
         if (artistEl) {
             artistEl.style.cursor = 'pointer';
