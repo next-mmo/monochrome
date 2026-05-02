@@ -3214,8 +3214,8 @@ export class UIRenderer {
             });
         };
 
-        const catColors = { podcast: '#8b5cf6', movie: '#ef4444', music: '#3b82f6', offline: '#14b8a6' };
-        const subColors = { khmer: '#f59e0b', english: '#10b981', thai: '#ec4899', kpop: '#6366f1' };
+        const catColors = { podcast: '#8b5cf6', movie: '#ef4444', music: '#3b82f6', offline: '#14b8a6', radio: '#f97316' };
+        const subColors = { khmer: '#f59e0b', english: '#10b981', thai: '#ec4899', kpop: '#6366f1', global: '#8b5cf6' };
 
         const renderTrackList = async () => {
             let allTracks = await radioTrackManager.loadTracks();

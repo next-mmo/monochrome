@@ -30,6 +30,15 @@ export const RADIO_CATEGORIES = [
             { id: 'kpop', label: 'K-Pop' },
         ],
     },
+    {
+        id: 'radio',
+        label: 'Radio',
+        subs: [
+            { id: 'all', label: 'All' },
+            { id: 'khmer', label: 'Khmer' },
+            { id: 'global', label: 'Global' },
+        ],
+    },
 ];
 
 const defaultTracks = [

@@ -33,7 +33,7 @@ class WebMMuxer {
         // SeekHead (skip for simplicity)
         // SegmentInfo
         enc.writeElement(0x1549A966, (info) => {
-            enc.writeElement(0x2AD7B1, encNum(1000000)); // TimestampScale = 1ms
+            enc.writeRaw(0x2AD7B1, encNum(1000000)); // TimestampScale = 1ms
             enc.writeUTF8(0x4D80, 'monochrome-video-export');
             enc.writeUTF8(0x5741, 'monochrome-video-export');
             const durMs = this._chunks.length > 0
@@ -44,19 +44,19 @@ class WebMMuxer {
         // Tracks
         enc.writeElement(0x1654AE6B, () => {
             enc.writeElement(0xAE, () => { // TrackEntry
-                enc.writeElement(0xD7, encNum(1));          // TrackNumber
-                enc.writeElement(0x73C5, encNum(1));         // TrackUID
-                enc.writeElement(0x83, encNum(1));           // TrackType = video
+                enc.writeRaw(0xD7, encNum(1));          // TrackNumber
+                enc.writeRaw(0x73C5, encNum(1));         // TrackUID
+                enc.writeRaw(0x83, encNum(1));           // TrackType = video
                 enc.writeUTF8(0x86, 'V_VP8');               // CodecID
                 enc.writeElement(0xE0, () => {               // Video
-                    enc.writeElement(0xB0, encNum(this._w));
-                    enc.writeElement(0xBA, encNum(this._h));
+                    enc.writeRaw(0xB0, encNum(this._w));
+                    enc.writeRaw(0xBA, encNum(this._h));
                 });
             });
         });
         // Cluster
         enc.writeElement(0x1F43B675, () => {
-            enc.writeElement(0xE7, encNum(0)); // Timestamp
+            enc.writeRaw(0xE7, encNum(0)); // Timestamp
             for (const c of this._chunks) {
                 const tsCluster = Math.round(c.ts / 1000);
                 const flags = c.isKey ? 0x80 : 0x00;
