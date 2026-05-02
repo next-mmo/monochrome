@@ -679,7 +679,10 @@ export class Player {
     }
 
     async setupHlsVideo(video, result, fallbackImg) {
-        const url = result.videoUrl || result.hlsUrl || result;
+        let url = result.videoUrl || result.hlsUrl || result;
+        if (window.location.protocol === 'https:' && typeof url === 'string' && url.startsWith('http://')) {
+            url = getProxyUrl(url);
+        }
         const Hls = (await import('hls.js')).default;
         if (!url) return;
 
@@ -1186,6 +1189,10 @@ export class Player {
                 this.currentRgValues = null;
                 this.applyReplayGain();
 
+                if (window.location.protocol === 'https:' && streamUrl.startsWith('http://')) {
+                    streamUrl = getProxyUrl(streamUrl);
+                }
+
                 activeElement.src = streamUrl;
                 this.applyAudioEffects();
 
@@ -1230,6 +1237,10 @@ export class Player {
 
                 this.currentRgValues = null;
                 this.applyReplayGain();
+
+                if (window.location.protocol === 'https:' && streamUrl.startsWith('http://')) {
+                    streamUrl = getProxyUrl(streamUrl);
+                }
 
                 activeElement.src = streamUrl;
                 this.applyAudioEffects();
@@ -1305,6 +1316,9 @@ export class Player {
 
                     this.updateAdaptiveQualityBadge();
                 } else {
+                    if (window.location.protocol === 'https:' && streamUrl.startsWith('http://')) {
+                        streamUrl = getProxyUrl(streamUrl);
+                    }
                     activeElement.src = streamUrl;
                 }
 
@@ -1393,6 +1407,10 @@ export class Player {
                             this.shakaPlayer.detach();
                         } catch {}
                         this.shakaInitialized = false;
+                    }
+                    
+                    if (window.location.protocol === 'https:' && streamUrl.startsWith('http://')) {
+                        streamUrl = getProxyUrl(streamUrl);
                     }
                     activeElement.src = streamUrl;
                     this.applyAudioEffects();
