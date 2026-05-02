@@ -69,10 +69,10 @@ if (typeof window !== 'undefined') {
     });
 
     // analytics
-    const plausibleScript = document.createElement('script');
-    plausibleScript.async = true;
-    plausibleScript.src = 'https://plausible.canine.tools/js/pa-dCMvQpiD1-AJmi8o3xviO.js';
-    document.head.appendChild(plausibleScript);
+    // const plausibleScript = document.createElement('script');
+    // plausibleScript.async = true;
+    // plausibleScript.src = 'https://plausible.canine.tools/js/pa-dCMvQpiD1-AJmi8o3xviO.js';
+    // document.head.appendChild(plausibleScript);
 
     window.plausible =
         window.plausible ||

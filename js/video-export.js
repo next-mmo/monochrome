@@ -1,3 +1,5 @@
+import { ffmpeg } from './ffmpeg.js';
+
 /**
  * video-export.js — Fast offline video export
  *
@@ -10,141 +12,34 @@
  * renders in seconds using GPU-accelerated encoding.
  */
 
-// ─── Minimal WebM/IVF muxer for VP8 (universally supported) ──────────────────
-// Produces a valid WebM file from raw VP8 chunks.
-
-class WebMMuxer {
-    constructor(w, h, fps) {
-        this._w = w; this._h = h; this._fps = fps;
-        this._chunks = []; // { data: Uint8Array, ts: number, keyframe: bool }
+// ─── AVCC to Annex B helpers ──────────────────────────────────────────────────
+function extractSpsPps(description) {
+    if (!description) return new Uint8Array(0);
+    const view = new DataView(description);
+    let offset = 5;
+    const numOfSps = view.getUint8(offset++) & 0x1F;
+    const out = [];
+    const annexB = new Uint8Array([0, 0, 0, 1]);
+    for (let i = 0; i < numOfSps; i++) {
+        const len = view.getUint16(offset);
+        offset += 2;
+        out.push(annexB);
+        out.push(new Uint8Array(description, offset, len));
+        offset += len;
     }
-    push(data, timestampUs, isKey) {
-        this._chunks.push({ data, ts: timestampUs, isKey });
+    const numOfPps = view.getUint8(offset++);
+    for (let i = 0; i < numOfPps; i++) {
+        const len = view.getUint16(offset);
+        offset += 2;
+        out.push(annexB);
+        out.push(new Uint8Array(description, offset, len));
+        offset += len;
     }
-    finish() {
-        // We use a simple approach: serialize to WebM EBML
-        const enc = new EBMLWriter();
-        // EBML header
-        enc.writeEBMLHeader();
-        // Segment
-        const segStart = enc.pos;
-        enc.writeID(0x18538067); // Segment
-        enc.writeVINT(0x01FFFFFFFFFFFFFF); // unknown size
-        // SeekHead (skip for simplicity)
-        // SegmentInfo
-        enc.writeElement(0x1549A966, (info) => {
-            enc.writeRaw(0x2AD7B1, encNum(1000000)); // TimestampScale = 1ms
-            enc.writeUTF8(0x4D80, 'monochrome-video-export');
-            enc.writeUTF8(0x5741, 'monochrome-video-export');
-            const durMs = this._chunks.length > 0
-                ? Math.round(this._chunks[this._chunks.length - 1].ts / 1000) + Math.round(1000 / this._fps)
-                : 0;
-            enc.writeFloat64(0x4489, durMs);
-        });
-        // Tracks
-        enc.writeElement(0x1654AE6B, () => {
-            enc.writeElement(0xAE, () => { // TrackEntry
-                enc.writeRaw(0xD7, encNum(1));          // TrackNumber
-                enc.writeRaw(0x73C5, encNum(1));         // TrackUID
-                enc.writeRaw(0x83, encNum(1));           // TrackType = video
-                enc.writeUTF8(0x86, 'V_VP8');               // CodecID
-                enc.writeElement(0xE0, () => {               // Video
-                    enc.writeRaw(0xB0, encNum(this._w));
-                    enc.writeRaw(0xBA, encNum(this._h));
-                });
-            });
-        });
-        // Cluster
-        enc.writeElement(0x1F43B675, () => {
-            enc.writeRaw(0xE7, encNum(0)); // Timestamp
-            for (const c of this._chunks) {
-                const tsCluster = Math.round(c.ts / 1000);
-                const flags = c.isKey ? 0x80 : 0x00;
-                // SimpleBlock
-                const trackNum = encVINT(1);
-                const buf = new Uint8Array(trackNum.length + 2 + 1 + c.data.length);
-                buf.set(trackNum, 0);
-                const tsRel = tsCluster & 0xFFFF;
-                buf[trackNum.length]     = (tsRel >> 8) & 0xFF;
-                buf[trackNum.length + 1] = tsRel & 0xFF;
-                buf[trackNum.length + 2] = flags;
-                buf.set(c.data, trackNum.length + 3);
-                enc.writeRaw(0xA3, buf);
-            }
-        });
-        return enc.toBlob('video/webm');
-    }
-}
-
-// ─── EBML encoder helpers ─────────────────────────────────────────────────────
-
-function encNum(n) {
-    // minimal big-endian bytes for integer
-    if (n === 0) return new Uint8Array([0]);
-    const bytes = [];
-    while (n > 0) { bytes.unshift(n & 0xFF); n >>>= 8; }
-    return new Uint8Array(bytes);
-}
-
-function encVINT(n) {
-    if (n < 0x7F)  return new Uint8Array([n | 0x80]);
-    if (n < 0x3FFF) return new Uint8Array([((n >> 8) | 0x40), n & 0xFF]);
-    return new Uint8Array([((n >> 16) | 0x20), (n >> 8) & 0xFF, n & 0xFF]);
-}
-
-class EBMLWriter {
-    constructor() { this._parts = []; this.pos = 0; }
-    writeBytes(arr) { this._parts.push(arr); this.pos += arr.length; }
-    writeID(id) {
-        const b = [];
-        let tmp = id;
-        while (tmp > 0) { b.unshift(tmp & 0xFF); tmp >>>= 8; }
-        this.writeBytes(new Uint8Array(b));
-    }
-    writeVINT(n) { this.writeBytes(encVINT(n)); }
-    writeElement(id, fn) {
-        this.writeID(id);
-        const sizeMark = this._parts.length;
-        const posMark  = this.pos;
-        this.writeBytes(new Uint8Array(4)); // placeholder
-        fn();
-        const contentSize = this.pos - posMark - 4;
-        // patch placeholder
-        const sz = new Uint8Array(4);
-        sz[0] = ((contentSize >> 21) & 0x0F) | 0x10;
-        sz[1] = (contentSize >> 14) & 0xFF;
-        sz[2] = (contentSize >> 7)  & 0xFF;
-        sz[3] =  contentSize        & 0x7F;
-        this._parts[sizeMark] = sz;
-    }
-    writeRaw(id, data) {
-        this.writeID(id);
-        this.writeBytes(encVINT(data.length));
-        this.writeBytes(data);
-    }
-    writeUTF8(id, str) {
-        const enc = new TextEncoder().encode(str);
-        this.writeRaw(id, enc);
-    }
-    writeFloat64(id, val) {
-        const buf = new ArrayBuffer(8);
-        new DataView(buf).setFloat64(0, val);
-        this.writeRaw(id, new Uint8Array(buf));
-    }
-    writeEBMLHeader() {
-        this.writeElement(0x1A45DFA3, () => {
-            this.writeRaw(0x4286, encNum(1));   // EBMLVersion
-            this.writeRaw(0x42F7, encNum(1));   // EBMLReadVersion
-            this.writeRaw(0x42F2, encNum(4));   // EBMLMaxIDLength
-            this.writeRaw(0x42F3, encNum(8));   // EBMLMaxSizeLength
-            this.writeUTF8(0x4282, 'webm');     // DocType
-            this.writeRaw(0x4287, encNum(4));   // DocTypeVersion
-            this.writeRaw(0x4285, encNum(2));   // DocTypeReadVersion
-        });
-    }
-    toBlob(mime) {
-        return new Blob(this._parts, { type: mime });
-    }
+    const total = out.reduce((acc, a) => acc + a.length, 0);
+    const res = new Uint8Array(total);
+    let pos = 0;
+    for (const a of out) { res.set(a, pos); pos += a.length; }
+    return res;
 }
 
 // ─── Frame renderer ───────────────────────────────────────────────────────────
@@ -240,7 +135,7 @@ function makeBlurred(coverImg, W, H) {
 
 // ─── Main export function ─────────────────────────────────────────────────────
 
-export async function exportVideo({ track, lyricsData, duration, coverUrl, onProgress, onStatus }) {
+export async function exportVideo({ track, lyricsData, duration, coverUrl, onProgress, onStatus, audioPlayer }) {
     const W   = 1920, H = 1080;
     const FPS = 30;
     const TOTAL_FRAMES = Math.ceil(duration * FPS);
@@ -261,19 +156,35 @@ export async function exportVideo({ track, lyricsData, duration, coverUrl, onPro
     const canvas = new OffscreenCanvas(W, H);
     const ctx    = canvas.getContext('2d');
 
-    // WebCodecs VideoEncoder
-    const chunks = [];
+    // WebCodecs VideoEncoder (H.264)
+    let globalSpsPps = null;
+    const h264Chunks = [];
     const encoder = new VideoEncoder({
-        output: (chunk) => {
+        output: (chunk, metadata) => {
+            // Extract SPS/PPS from DecoderConfig only once
+            if (metadata?.decoderConfig?.description && !globalSpsPps) {
+                globalSpsPps = extractSpsPps(metadata.decoderConfig.description);
+                h264Chunks.push(globalSpsPps);
+            }
+            
             const buf = new Uint8Array(chunk.byteLength);
             chunk.copyTo(buf);
-            chunks.push({ data: buf, ts: chunk.timestamp, isKey: chunk.type === 'key' });
+            
+            // Convert AVCC length prefixes to Annex B start codes
+            let offset = 0;
+            const annexB = new Uint8Array([0, 0, 0, 1]);
+            while (offset < buf.length) {
+                const nalLen = new DataView(buf.buffer, buf.byteOffset + offset, 4).getUint32(0);
+                buf.set(annexB, offset);
+                offset += 4 + nalLen;
+            }
+            h264Chunks.push(buf);
         },
         error: (e) => { throw e; },
     });
 
     encoder.configure({
-        codec: 'vp8',
+        codec: 'avc1.4D0028', // Main profile, level 4.0
         width: W, height: H,
         bitrate: 8_000_000,
         framerate: FPS,
@@ -302,10 +213,56 @@ export async function exportVideo({ track, lyricsData, duration, coverUrl, onPro
     await encoder.flush();
     encoder.close();
 
-    onStatus?.('Muxing…');
-    const muxer = new WebMMuxer(W, H, FPS);
-    for (const c of chunks) muxer.push(c.data, c.ts, c.isKey);
-    return muxer.finish(); // Blob
+    onStatus?.('Preparing video bitstream…');
+    const totalVideoSize = h264Chunks.reduce((acc, c) => acc + c.length, 0);
+    const videoBuffer = new Uint8Array(totalVideoSize);
+    let vPos = 0;
+    for (const c of h264Chunks) {
+        videoBuffer.set(c, vPos);
+        vPos += c.length;
+    }
+    const videoBlob = new Blob([videoBuffer], { type: 'video/mp4' });
+
+    if (audioPlayer && audioPlayer.src) {
+        try {
+            onStatus?.('Fetching audio…');
+            const audioRes = await fetch(audioPlayer.src);
+            const audioBlob = await audioRes.blob();
+
+            onStatus?.('Muxing audio & video into MP4…');
+            const finalBlob = await ffmpeg(audioBlob, {
+                extraFiles: [{ name: 'video.264', data: videoBuffer }],
+                rawArgs: ['-framerate', String(FPS), '-i', 'video.264', '-i', 'input', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-map', '0:v:0', '-map', '1:a:0', '-shortest', 'output.mp4'],
+                outputName: 'output.mp4',
+                outputMime: 'video/mp4',
+                onProgress: (prog) => {
+                    if (prog.stage === 'encoding') {
+                        onStatus?.(`Muxing: ${Math.round(prog.progress)}%`);
+                    }
+                }
+            });
+            return finalBlob;
+        } catch (e) {
+            console.error('Failed to mux audio:', e);
+            onStatus?.('Audio muxing failed, returning raw video');
+        }
+    } else {
+        try {
+            onStatus?.('Muxing video into MP4…');
+            const emptyBlob = new Blob([], { type: 'audio/mp3' });
+            const finalBlob = await ffmpeg(emptyBlob, {
+                extraFiles: [{ name: 'video.264', data: videoBuffer }],
+                rawArgs: ['-framerate', String(FPS), '-i', 'video.264', '-c:v', 'copy', 'output.mp4'],
+                outputName: 'output.mp4',
+                outputMime: 'video/mp4'
+            });
+            return finalBlob;
+        } catch (e) {
+            console.error('Failed to mux to MP4:', e);
+        }
+    }
+
+    return videoBlob;
 }
 
 // ─── Lyrics helpers ───────────────────────────────────────────────────────────
@@ -413,6 +370,7 @@ export function openVideoExportModal({ track, lyricsManager, audioPlayer, coverU
                 lyricsData,
                 duration,
                 coverUrl,
+                audioPlayer,
                 onProgress: (p) => { fillEl.style.width = `${Math.round(p * 100)}%`; },
                 onStatus:   (s) => { statusEl.textContent = s; },
             });
@@ -423,7 +381,7 @@ export function openVideoExportModal({ track, lyricsManager, audioPlayer, coverU
             const url = URL.createObjectURL(blob);
             const a   = Object.assign(document.createElement('a'), {
                 href:     url,
-                download: `${track.title || 'export'}-1080p.webm`,
+                download: `${track.title || 'export'}-1080p.mp4`,
             });
             a.click();
             setTimeout(() => URL.revokeObjectURL(url), 10_000);
